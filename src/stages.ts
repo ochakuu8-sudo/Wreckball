@@ -124,17 +124,31 @@ export interface ChunkData {
   clusters?: SemanticCluster[];
 }
 
-export interface StageDef {
+export interface StageDef extends StageConfig {
   name: string;
-  bgTopR: number; bgTopG: number; bgTopB: number;
-  bgBottomR: number; bgBottomG: number; bgBottomB: number;
+  nameEn: string;
+  bgTop: readonly [number, number, number];
+  bgBottom: readonly [number, number, number];
 }
+
+const BG_TOP = [0.13, 0.18, 0.28] as const;
+const BG_BOTTOM = [0.07, 0.06, 0.07] as const;
 
 export const STAGES: StageDef[] = [
   {
+    level: 1,
     name: 'WRECK SPRINT',
-    bgTopR: 0.13, bgTopG: 0.18, bgTopB: 0.28,
-    bgBottomR: 0.07, bgBottomG: 0.06, bgBottomB: 0.07,
+    nameEn: 'WRECK SPRINT',
+    buildings: [],
+    bumpers: [],
+    furniture: [],
+    vehicles: [],
+    grounds: [],
+    prePlacedHumans: [],
+    bgTop: BG_TOP,
+    bgBottom: BG_BOTTOM,
+    bgTopR: BG_TOP[0], bgTopG: BG_TOP[1], bgTopB: BG_TOP[2],
+    bgBottomR: BG_BOTTOM[0], bgBottomG: BG_BOTTOM[1], bgBottomB: BG_BOTTOM[2],
   },
 ];
 
@@ -185,8 +199,8 @@ const RACE_COURSE: RaceCellKind[][] = [
 
 export const TOTAL_CHUNKS = Math.ceil(RACE_COURSE.length / RACE_ROWS_PER_CHUNK);
 
-export function chunkInfoFor(chunkId: number): { stageIndex: number; localIndex: number; stage: StageDef } {
-  return { stageIndex: 0, localIndex: chunkId, stage: STAGES[0] };
+export function chunkInfoFor(chunkId: number): { stageIndex: number; localIndex: number; stage: StageDef; finished: boolean } {
+  return { stageIndex: 0, localIndex: chunkId, stage: STAGES[0], finished: chunkId >= TOTAL_CHUNKS };
 }
 
 function cellGround(kind: RaceCellKind): GroundType {
