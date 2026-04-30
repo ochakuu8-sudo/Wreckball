@@ -203,7 +203,11 @@ export function chunkInfoFor(chunkId: number): { stageIndex: number; localIndex:
   return { stageIndex: 0, localIndex: chunkId, stage: STAGES[0], finished: chunkId >= TOTAL_CHUNKS };
 }
 
-function cellGround(kind: RaceCellKind): GroundType {
+function cellGround(kind: RaceCellKind, col: number, globalRow: number): GroundType {
+  if (kind === 'empty') {
+    const variants: GroundType[] = ['asphalt', 'concrete', 'residential_tile', 'grass'];
+    return variants[Math.abs(globalRow + col * 2) % variants.length];
+  }
   switch (kind) {
     case 'fuel': return 'tile';
     case 'boost': return 'steel_plate';
@@ -231,11 +235,41 @@ function addBuilding(
   out.push({ x: x + dx, y: centerY - def.h / 2 + dy, size, blockIdx });
 }
 
+function addFurniture(out: FurnitureDef[], type: FurnitureType, x: number, y: number, dx = 0, dy = 0): void {
+  out.push({ type, x: x + dx, y: y + dy });
+}
+
 function addHumans(out: Array<{ x: number; y: number }>, x: number, y: number, count: number): void {
   for (let i = 0; i < count; i++) {
     const a = i * 2.399963229728653;
     const r = 8 + (i % 4) * 4;
     out.push({ x: x + Math.cos(a) * r, y: y + Math.sin(a) * r });
+  }
+}
+
+function decorateEmpty(out: ChunkData, x: number, centerY: number, col: number, globalRow: number): void {
+  const variant = Math.abs(globalRow * 3 + col) % 5;
+  if (variant === 0) {
+    addFurniture(out.furniture, 'tree', x, centerY, -22, 18);
+    addFurniture(out.furniture, 'bush', x, centerY, 18, -18);
+    addFurniture(out.furniture, 'bench', x, centerY, 0, -8);
+  } else if (variant === 1) {
+    addFurniture(out.furniture, 'wood_fence', x, centerY, -28, -24);
+    addFurniture(out.furniture, 'wood_fence', x, centerY, 28, -24);
+    addFurniture(out.furniture, 'potted_plant', x, centerY, -8, 12);
+    addFurniture(out.furniture, 'mailbox', x, centerY, 18, 10);
+  } else if (variant === 2) {
+    addFurniture(out.furniture, 'street_lamp', x, centerY, -28, 22);
+    addFurniture(out.furniture, 'bicycle_rack', x, centerY, 22, -12);
+    addHumans(out.prePlacedHumans, x, centerY, 2);
+  } else if (variant === 3) {
+    addFurniture(out.furniture, 'flower_bed', x, centerY, -18, -14);
+    addFurniture(out.furniture, 'flower_bed', x, centerY, 18, 12);
+    addFurniture(out.furniture, 'sakura_tree', x, centerY, 0, 28);
+  } else {
+    addFurniture(out.furniture, 'power_pole', x, centerY, -32, 24);
+    addFurniture(out.furniture, 'garbage', x, centerY, 24, -20);
+    addFurniture(out.furniture, 'cat', x, centerY, 2, 4);
   }
 }
 
@@ -251,46 +285,92 @@ function buildCell(
   const x = RACE_X[col];
   const cellBottom = chunkBaseY + localRow * RACE_CELL_H;
   const centerY = cellBottom + RACE_CELL_H / 2;
-  out.grounds.push({ type: cellGround(kind), x, y: centerY, w: RACE_CELL_W, h: RACE_CELL_H });
+  out.grounds.push({ type: cellGround(kind, col, globalRow), x, y: centerY, w: RACE_CELL_W, h: RACE_CELL_H });
 
-  if (kind === 'empty') return;
+  if (kind === 'empty') {
+    decorateEmpty(out, x, centerY, col, globalRow);
+    return;
+  }
 
   switch (kind) {
     case 'light':
-      addBuilding(out.buildings, globalRow % 2 === 0 ? 'house' : 'townhouse', x, centerY, blockIdx);
-      addHumans(out.prePlacedHumans, x, centerY + 4, 3);
+      addBuilding(out.buildings, globalRow % 2 === 0 ? 'house' : 'townhouse', x, centerY, blockIdx, -10, -2);
+      addFurniture(out.furniture, 'wood_fence', x, centerY, -30, -24);
+      addFurniture(out.furniture, 'potted_plant', x, centerY, 14, -18);
+      addFurniture(out.furniture, 'mailbox', x, centerY, 26, -12);
+      addFurniture(out.furniture, 'tree', x, centerY, 26, 24);
+      addHumans(out.prePlacedHumans, x, centerY + 4, 4);
       break;
     case 'fuel':
       addBuilding(out.buildings, globalRow < 8 ? 'convenience' : 'train_station', x, centerY, blockIdx);
-      addHumans(out.prePlacedHumans, x, centerY + 6, 12);
+      addFurniture(out.furniture, 'vending', x, centerY, -28, -18);
+      addFurniture(out.furniture, 'sign_board', x, centerY, 24, -14);
+      addFurniture(out.furniture, 'bicycle_rack', x, centerY, -20, 18);
+      addFurniture(out.furniture, 'a_frame_sign', x, centerY, 20, 18);
+      addHumans(out.prePlacedHumans, x, centerY + 6, 14);
       break;
     case 'boost':
       addBuilding(out.buildings, 'bus_terminal_shelter', x, centerY, blockIdx);
-      addHumans(out.prePlacedHumans, x, centerY, 4);
+      addFurniture(out.furniture, 'banner_pole', x, centerY, -30, 20);
+      addFurniture(out.furniture, 'banner_pole', x, centerY, 30, 20);
+      addFurniture(out.furniture, 'traffic_cone', x, centerY, -18, -18);
+      addFurniture(out.furniture, 'traffic_cone', x, centerY, 18, -18);
+      addHumans(out.prePlacedHumans, x, centerY, 5);
       break;
     case 'gas':
-      addBuilding(out.buildings, 'gas_station', x, centerY, blockIdx);
-      addHumans(out.prePlacedHumans, x, centerY, 3);
+      // Make adjacent gas cells read as one gas-station complex: left = building, right = yard/details.
+      if (col === 0 || RACE_COURSE[globalRow]?.[col - 1] !== 'gas') {
+        addBuilding(out.buildings, 'gas_station', x, centerY, blockIdx);
+        addFurniture(out.furniture, 'sign_board', x, centerY, 24, 20);
+      } else {
+        addBuilding(out.buildings, 'garage', x, centerY, blockIdx, -10, 2);
+        addFurniture(out.furniture, 'car', x, centerY, 18, -8);
+      }
+      addFurniture(out.furniture, 'gas_canister', x, centerY, -26, -18);
+      addFurniture(out.furniture, 'fire_extinguisher', x, centerY, 26, -18);
+      addFurniture(out.furniture, 'traffic_cone', x, centerY, -10, 20);
+      addFurniture(out.furniture, 'traffic_cone', x, centerY, 10, 20);
+      addHumans(out.prePlacedHumans, x, centerY, 4);
       break;
     case 'dense':
-      addBuilding(out.buildings, 'shop', x, centerY, blockIdx, -18, -8);
-      addBuilding(out.buildings, 'ramen', x, centerY, blockIdx, 12, 0);
+      addBuilding(out.buildings, 'shop', x, centerY, blockIdx, -20, -8);
+      addBuilding(out.buildings, 'ramen', x, centerY, blockIdx, 8, -2);
       addBuilding(out.buildings, 'house', x, centerY, blockIdx, 24, 24);
-      addHumans(out.prePlacedHumans, x, centerY + 6, 8);
+      addFurniture(out.furniture, 'noren', x, centerY, -20, -22);
+      addFurniture(out.furniture, 'chouchin', x, centerY, 0, -22);
+      addFurniture(out.furniture, 'vending', x, centerY, 28, -12);
+      addFurniture(out.furniture, 'street_lamp', x, centerY, -30, 24);
+      addHumans(out.prePlacedHumans, x, centerY + 6, 10);
       break;
     case 'score':
       addBuilding(out.buildings, globalRow > 17 ? 'tower' : 'apartment_tall', x, centerY, blockIdx);
-      addHumans(out.prePlacedHumans, x, centerY + 8, 8);
+      addFurniture(out.furniture, 'street_lamp', x, centerY, -28, -22);
+      addFurniture(out.furniture, 'street_lamp', x, centerY, 28, -22);
+      addFurniture(out.furniture, 'bench', x, centerY, 0, 26);
+      addHumans(out.prePlacedHumans, x, centerY + 8, 9);
       break;
     case 'hazard':
       addBuilding(out.buildings, 'parking', x, centerY, blockIdx);
+      addFurniture(out.furniture, 'traffic_cone', x, centerY, -28, -22);
+      addFurniture(out.furniture, 'traffic_cone', x, centerY, 28, -22);
+      addFurniture(out.furniture, 'sandbags', x, centerY, 0, 20);
+      addFurniture(out.furniture, 'electric_box', x, centerY, 24, 18);
       break;
     case 'recovery':
       addBuilding(out.buildings, 'cafe', x, centerY, blockIdx);
-      addHumans(out.prePlacedHumans, x, centerY + 8, 10);
+      addFurniture(out.furniture, 'parasol', x, centerY, -24, 18);
+      addFurniture(out.furniture, 'bench', x, centerY, 18, 16);
+      addFurniture(out.furniture, 'potted_plant', x, centerY, -18, -16);
+      addFurniture(out.furniture, 'flower_bed', x, centerY, 22, -16);
+      addHumans(out.prePlacedHumans, x, centerY + 8, 12);
       break;
     case 'goal':
-      if (col === 1) addBuilding(out.buildings, 'castle', 0, centerY, blockIdx);
+      if (col === 1) {
+        addBuilding(out.buildings, 'castle', 0, centerY, blockIdx);
+        addFurniture(out.furniture, 'banner_pole', x, centerY, -38, 26);
+        addFurniture(out.furniture, 'banner_pole', x + 90, centerY, 38, 26);
+        addHumans(out.prePlacedHumans, 0, centerY - 20, 18);
+      }
       break;
   }
 }
@@ -321,12 +401,10 @@ export function generateChunk(chunkId: number): ChunkData {
     for (let col = 0; col < RACE_COLS; col++) buildCell(row[col], col, globalRow, localRow, baseY, chunkId, out);
   }
 
-  for (let localRow = 0; localRow <= RACE_ROWS_PER_CHUNK; localRow++) {
-    const y = baseY + localRow * RACE_CELL_H;
-    out.horizontalRoads.push({ cy: y, h: 6, xMin: C.WORLD_MIN_X, xMax: C.WORLD_MAX_X, cls: 'street' });
-  }
-  for (const x of [-90, 0, 90]) {
-    out.verticalRoads.push({ cx: x, w: 6, yMin: baseY, yMax: baseY + RACE_ROWS_PER_CHUNK * RACE_CELL_H, cls: x === 0 ? 'avenue' : 'street' });
+  // Keep only chunk-boundary roads. Internal 90px cell borders remain logical, not visual roads.
+  out.horizontalRoads.push({ cy: baseY, h: 4, xMin: C.WORLD_MIN_X, xMax: C.WORLD_MAX_X, cls: 'street' });
+  if (chunkId % 3 === 0) {
+    out.verticalRoads.push({ cx: 0, w: 4, yMin: baseY, yMax: baseY + RACE_ROWS_PER_CHUNK * RACE_CELL_H, cls: 'avenue' });
   }
   return out;
 }
