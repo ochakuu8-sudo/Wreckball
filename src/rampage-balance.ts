@@ -1,0 +1,22 @@
+export const MOMENTUM_MAX = 100;
+export const MOMENTUM_INITIAL = 35;
+
+export const MOMENTUM_DRAIN_PER_SEC = 4.2;
+export const MOMENTUM_DRAIN_OVERDRIVE_SCALE = 0.45;
+
+export const HUMAN_MOMENTUM_GAIN = 1.05;
+export const HUMAN_COMBO_GAIN_SCALE = 0.035;
+
+export const LOW_MOMENTUM_THRESHOLD = 18;
+export const CRIT_MOMENTUM_THRESHOLD = 10;
+export const LOW_MOMENTUM_GRACE_SEC = 3.0;
+
+export const OVERDRIVE_COMBO_THRESHOLD = 24;
+export const OVERDRIVE_DURATION_SEC = 3.0;
+
+export const HARD_BUILDING_IMPACT_PENALTY = 8;
+export const BALL_LOST_PENALTY = 20;
+export const BUILDING_DESTROY_MOMENTUM_GAIN_PER_TIER = 0.7;
+
+export const SCROLL_SPEED_MIN = 260;
+export const SCROLL_SPEED_MAX = 880;
