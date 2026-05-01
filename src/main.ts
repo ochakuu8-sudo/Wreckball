@@ -1,8 +1,13 @@
-import { RampageGame } from './rampage-game-visual-wrapper';
+import { Game } from './game';
 import { initSdk } from './sdk';
 
 const canvas = document.getElementById('gameCanvas') as HTMLCanvasElement;
 if (!canvas) throw new Error('Canvas not found');
+
+const params = new URLSearchParams(window.location.search);
+const screenshotMode = params.has('screenshot');
+const screenshotChunkId = params.has('chunk') ? parseInt(params.get('chunk')!, 10) : null;
+if (screenshotMode) document.body.classList.add('screenshot-mode');
 
 const wrap = document.getElementById('wrap') as HTMLElement;
 function applyScale() {
@@ -12,8 +17,8 @@ function applyScale() {
 window.addEventListener('resize', applyScale);
 applyScale();
 
-// Runtime copy overrides keep the existing index.html shell while the new
-// rampage loop owns the actual game rules.
+// Keep the existing high-quality legacy shell and visuals, while the next
+// rampage-rule integration replaces the old fuel/stage economy.
 const style = document.createElement('style');
 style.textContent = `
   #life-wrap::before { content: 'SPEED' !important; }
@@ -31,7 +36,7 @@ if (rightSub) rightSub.innerHTML = 'BUILD MOMENTUM<br>BREAK BIGGER BLOCKS<br>CHA
 initSdk();
 
 try {
-  const game = new RampageGame(canvas);
+  const game = new Game(canvas, { screenshotMode, screenshotChunkId });
   void game;
   const loading = document.getElementById('loading');
   if (loading) {
