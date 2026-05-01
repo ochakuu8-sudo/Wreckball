@@ -1,4 +1,4 @@
-import { Game } from './game';
+import { RampageGame } from './game-rampage';
 import { initSdk } from './sdk';
 
 const canvas = document.getElementById('gameCanvas') as HTMLCanvasElement;
@@ -17,8 +17,8 @@ function applyScale() {
 window.addEventListener('resize', applyScale);
 applyScale();
 
-// Keep the existing high-quality legacy shell and visuals, while the next
-// rampage-rule integration replaces the old fuel/stage economy.
+// Keep the existing high-quality legacy shell and visuals, while the rampage
+// integration layer replaces the old fuel/stage economy in small phases.
 const style = document.createElement('style');
 style.textContent = `
   #life-wrap::before { content: 'SPEED' !important; }
@@ -29,14 +29,14 @@ if (leftTitle) leftTitle.innerHTML = 'RAMPAGE<br>PINBALL';
 const leftSub = document.querySelector('#side-left .sub');
 if (leftSub) leftSub.innerHTML = 'CRUSH THE CITY<br>STOMP FOR SPEED';
 const rightTitle = document.querySelector('#side-right .title-big');
-if (rightTitle) rightTitle.innerHTML = 'WRECK<br>POWER';
+if (rightTitle) rightTitle.innerHTML = 'SPEED<br>CHAIN';
 const rightSub = document.querySelector('#side-right .sub');
-if (rightSub) rightSub.innerHTML = 'BUILD MOMENTUM<br>BREAK BIGGER BLOCKS<br>CHAIN HUMANS<br>OVERDRIVE';
+if (rightSub) rightSub.innerHTML = 'BREAK SMALL BUILDINGS<br>CRUSH HUMANS<br>KEEP SPEED<br>OVERDRIVE';
 
 initSdk();
 
 try {
-  const game = new Game(canvas, { screenshotMode, screenshotChunkId });
+  const game = new RampageGame(canvas, { screenshotMode, screenshotChunkId });
   void game;
   const loading = document.getElementById('loading');
   if (loading) {
