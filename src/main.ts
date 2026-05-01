@@ -1,4 +1,4 @@
-import { RampageGame } from './rampage-game-slopes';
+import { RampageGame } from './rampage-game-inlanes';
 import { initSdk } from './sdk';
 
 const canvas = document.getElementById('gameCanvas') as HTMLCanvasElement;
