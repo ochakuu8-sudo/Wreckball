@@ -328,25 +328,43 @@ export class RampageGame extends Game {
     const humans = game.humans;
     if (!humans) return;
 
+    let lastRewardTime = 0;
+    const getCrushTotal = (): number => typeof game.totalHumans === 'number' ? game.totalHumans : 0;
+
+    const maybeReward = (beforeTotal: number, args: unknown[]) => {
+      const afterTotal = getCrushTotal();
+      const delta = afterTotal - beforeTotal;
+      if (delta <= 0) return;
+
+      const now = performance.now();
+      // Guard against multiple wrapped methods observing the same stomp in the
+      // same frame. The legacy game already increments totalHumans once per
+      // stomp, so this is only a duplicate-popup guard.
+      if (now - lastRewardTime < 30) return;
+      lastRewardTime = now;
+
+      let reward = rules.onHumanCrushed(1);
+      for (let i = 1; i < delta; i++) reward = rules.onHumanCrushed(1);
+      syncMomentumToLegacyFuel();
+
+      const x = typeof args[0] === 'number' ? args[0] as number : 0;
+      const y = typeof args[1] === 'number' ? args[1] as number : 0;
+      showPopup(x, y, reward.overdriveStarted ? 'OVERDRIVE' : `+SPEED x${reward.combo}`, 'fuel');
+    };
+
     const wrapResultReward = (name: string) => {
       if (typeof humans[name] !== 'function') return;
       const original = humans[name].bind(humans);
       humans[name] = (...args: unknown[]) => {
+        const beforeTotal = getCrushTotal();
         const result = original(...args);
-        const rewarded = typeof result === 'number' ? result > 0 : !!result;
-        if (rewarded) {
-          const reward = rules.onHumanCrushed(1);
-          syncMomentumToLegacyFuel();
-          const x = typeof args[0] === 'number' ? args[0] as number : 0;
-          const y = typeof args[1] === 'number' ? args[1] as number : 0;
-          showPopup(x, y, reward.overdriveStarted ? 'OVERDRIVE' : `+SPEED x${reward.combo}`, 'fuel');
-        }
+        maybeReward(beforeTotal, args);
         return result;
       };
     };
 
-    // Cover likely legacy crush/check method names without requiring a direct
-    // rewrite of HumanManager internals.
+    // Cover likely legacy crush/check method names without relying on their
+    // return values. Reward only when Game.totalHumans actually increases.
     for (const name of ['checkCrush', 'checkBallHit', 'checkBallCrush', 'crushAt', 'crush', 'stompAt']) {
       wrapResultReward(name);
     }
