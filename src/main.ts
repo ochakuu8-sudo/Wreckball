@@ -1,4 +1,4 @@
-import { RampageGame } from './rampage-game-solid-wrapper';
+import { RampageGame } from './rampage-game-visual-wrapper';
 import { initSdk } from './sdk';
 
 const canvas = document.getElementById('gameCanvas') as HTMLCanvasElement;
