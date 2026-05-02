@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1">
   <title>Kaiju Pinball — 怪獣ピンボール</title>
+  <link rel="icon" href="data:,">
   <script src="https://sdk.crazygames.com/crazygames-sdk-v3.js"></script>
   <style>
     /* セルフホスト版 Press Start 2P (Google Fonts 由来 / SIL OFL 1.1) */
@@ -12,7 +13,7 @@
       font-style: normal;
       font-weight: 400;
       font-display: swap;
-      src: url('./fonts/PressStart2P-latin.woff2') format('woff2');
+      src: url('/fonts/PressStart2P-latin.woff2') format('woff2');
       unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
     }
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -147,8 +148,18 @@
     }
     /* ラベル "FUEL" をバー内左上に */
     #life-wrap::before {
-      content: 'FUEL';
+      content: 'GEAR';
       position: absolute; top: 1px; left: 3px;
+      font-family: 'Press Start 2P', monospace;
+      font-size: 6px; letter-spacing: 1px;
+      color: #000;
+      text-shadow: 0 1px 0 rgba(255,255,255,0.25);
+      z-index: 2;
+      pointer-events: none;
+    }
+    #life-wrap::after {
+      content: 'G' attr(data-gear);
+      position: absolute; top: 1px; right: 4px;
       font-family: 'Press Start 2P', monospace;
       font-size: 6px; letter-spacing: 1px;
       color: #000;
@@ -490,23 +501,23 @@
 </head>
 <body>
 <div id="side-left">
-  <div class="title-big">KAIJU<br>PINBALL</div>
-  <div class="sub">CRUSH THE CITY<br>STOMP FOR FUEL</div>
+  <div class="title-big">RAMPAGE<br>PINBALL</div>
+  <div class="sub">CRUSH THE CITY<br>EAT FOR GEARS</div>
   <div class="controls">CONTROLS<br>A / LEFT = L<br>D / RIGHT = R<br>SPACE = BOTH</div>
 </div>
 <div id="side-right">
-  <div class="title-big" style="font-size:18px;">5 STAGES<br>+ BOSS</div>
-  <div class="sub">SUBURBS<br>NEON CITY<br>OLD TOWN<br>HARBOR<br>THEME PARK</div>
+  <div class="title-big" style="font-size:18px;">GEAR<br>CHAIN</div>
+  <div class="sub">BREAK SMALL BUILDINGS<br>EAT HUMANS<br>SHIFT UP<br>OVERDRIVE</div>
 </div>
 <div id="wrap">
   <canvas id="gameCanvas" width="360" height="580"></canvas>
   <div id="overlay">
     <div id="popup-layer"></div>
     <div id="distance-display">0 m</div>
-    <div id="zone-display">STAGE 1 / SUBURBS</div>
+    <div id="zone-display">CHAIN x0</div>
     <div id="score-display">SCORE 0</div>
     <div id="best-display" class="hidden">BEST 0</div>
-    <div id="life-wrap"><div id="life-fill"></div></div>
+    <div id="life-wrap" data-gear="1"><div id="life-fill"></div></div>
     <button id="pause-btn" type="button" aria-label="Pause">II</button>
     <button id="mute-btn" type="button" aria-label="Toggle sound">&#9834;</button>
   </div>
@@ -534,13 +545,13 @@
     <h1 id="stage-clear-title">STAGE CLEAR</h1>
     <div id="stage-clear-sub">SUBURBS</div>
     <div id="stage-clear-score">SCORE 0</div>
-    <div id="stage-clear-fuel">FUEL 0%</div>
+    <div id="stage-clear-fuel">GEAR 0%</div>
     <div id="stage-clear-next">NEXT: NEON DISTRICT</div>
     <div id="stage-clear-tap">TAP / CLICK TO NEXT STAGE</div>
   </div>
   <div id="title">
-    <h1>KAIJU<br>PINBALL</h1>
-    <div id="title-sub">CRUSH THE CITY.<br>STOMP FOR FUEL.</div>
+    <h1>RAMPAGE<br>PINBALL</h1>
+    <div id="title-sub">CRUSH THE CITY.<br>EAT FOR GEARS.</div>
     <div id="title-controls">A / LEFT = L&nbsp;&nbsp;D / RIGHT = R<br>SPACE / CENTER TAP = BOTH</div>
     <div id="title-best" class="hidden">BEST 0 m</div>
     <div id="title-tap">TAP / CLICK TO START</div>
@@ -551,7 +562,7 @@
   </div>
   <!-- スクリーンショット用タイトルオーバーレイ (?screenshot=1 でのみ表示) -->
   <div id="screenshot-title">
-    <div class="sst-main">KAIJU<br>PINBALL</div>
+    <div class="sst-main">RAMPAGE<br>PINBALL</div>
     <div class="sst-sub">CRUSH THE CITY</div>
   </div>
   <div id="no-webgl">

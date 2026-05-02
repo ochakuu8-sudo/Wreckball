@@ -38,9 +38,15 @@ export class UIManager {
     this.elDistance.textContent = `${meters.toLocaleString()} m`;
   }
 
-  /** ステージ表示: "STAGE N / NAME" (N は 1-origin) */
+  setCheckpoint(distanceM: number, nextCheckpointM: number, secondsLeft: number) {
+    const time = Math.max(0, secondsLeft);
+    this.elDistance.textContent =
+      `${distanceM.toLocaleString()}m CP${nextCheckpointM.toLocaleString()} ${time.toFixed(1)}s`;
+  }
+
+  /** ステージ表示: "STAGE N / NAME" (N は 1-origin)。Rampage では CHAIN 表示にも使う。 */
   setZone(stageIndex: number, stageNameEn: string) {
-    this.elZone.textContent = `STAGE ${stageIndex + 1} / ${stageNameEn}`;
+    this.elZone.textContent = stageIndex < 0 ? stageNameEn : `STAGE ${stageIndex + 1} / ${stageNameEn}`;
   }
 
   /** 現在スコア (建物・車両・家具の破壊で累積) */
@@ -58,14 +64,34 @@ export class UIManager {
     }
   }
 
-  /** 燃料ゲージ (0-FUEL_MAX): バーの width を % にマップ + 閾値で警告表示 */
-  setFuel(fuel: number) {
-    const pct = Math.max(0, Math.min(100, (fuel / C.FUEL_MAX) * 100));
+  setGear(chargePercent: number, gear: number, downThreshold: number) {
+    const pct = Math.max(0, Math.min(100, chargePercent));
     this.elFuelFill.style.width = `${pct}%`;
-    const low  = fuel <= C.FUEL_LOW_THRESHOLD && fuel > C.FUEL_LOW_THRESHOLD / 2;
-    const crit = fuel <= C.FUEL_LOW_THRESHOLD / 2;
+    this.elFuelWrap.dataset.gear = String(gear);
+    const low  = chargePercent <= downThreshold * 1.8 && chargePercent > downThreshold;
+    const crit = chargePercent <= downThreshold;
     this.elFuelWrap.classList.toggle('low',  low);
     this.elFuelWrap.classList.toggle('crit', crit);
+  }
+
+  setSpeed(momentum: number) {
+    this.setGear(momentum, 1, C.FUEL_LOW_THRESHOLD / 2);
+  }
+
+  /** 燃料ゲージ互換: Rampage では SPEED へ委譲する */
+  setFuel(fuel: number) {
+    this.setSpeed(fuel);
+  }
+
+  setChain(combo: number, overdrive: boolean, speedPhase = '') {
+    const phase = overdrive ? 'OVERDRIVE' : speedPhase;
+    const chain = `CHAIN x${combo}`;
+    const label = phase ? `${phase} / ${chain}` : chain;
+    this.setZone(-1, label);
+  }
+
+  setRaceStatus(gear: number, phase: string, chain: number) {
+    this.setZone(-1, `G${gear} ${phase} / HUMAN x${chain}`);
   }
 
   /** 毎フレーム1回: ポップアップレイヤー全体をカメラに追従 */
@@ -74,9 +100,15 @@ export class UIManager {
   }
 
   showGameOver(distanceM: number, score: number, destroys: number, humans: number, best: number) {
+    this.showRunOver(distanceM, score, destroys, humans, 0, best);
+  }
+
+  showRunOver(distanceM: number, score: number, destroys: number, humans: number, maxCombo: number, best: number) {
+    const title = this.elGameover.querySelector('h1');
+    if (title) title.textContent = 'RUN OVER';
     this.elFinalScore.textContent  = `SCORE ${score.toLocaleString()}`;
     this.elFinalBest.textContent   = `${distanceM.toLocaleString()} m | ${destroys} DESTROYED`;
-    this.elFinalStats.textContent  = `${humans.toLocaleString()} STOMPS`;
+    this.elFinalStats.textContent  = `${humans.toLocaleString()} STOMPS | MAX CHAIN x${maxCombo}`;
     this.elFinalRecord.textContent = `BEST ${best.toLocaleString()}`;
     this.elGameover.classList.add('show');
   }
@@ -103,7 +135,7 @@ export class UIManager {
     this.elStageClearSub.textContent   = stageNameEn;
     this.elStageClearNext.textContent  = `NEXT: ${nextStageNameEn}`;
     this.elStageClearScore.textContent = `SCORE ${score.toLocaleString()}`;
-    this.elStageClearFuel.textContent  = `FUEL ${fuelPct}%`;
+    this.elStageClearFuel.textContent  = `GEAR ${fuelPct}%`;
     this.elStageClear.classList.add('show');
   }
 
@@ -123,5 +155,10 @@ export class UIManager {
     el.style.top = `${C.CANVAS_HEIGHT / 2 - worldY}px`;
     this.elPopupLayer.appendChild(el);
     setTimeout(() => el.remove(), 850);
+  }
+
+  showSpeedPopup(worldX: number, worldY: number, combo: number, overdrive: boolean, shiftedUp = false) {
+    const text = shiftedUp ? 'GEAR UP' : overdrive ? 'OVERDRIVE' : `+GEAR x${combo}`;
+    this.showWorldPopup(worldX, worldY, text, 'fuel');
   }
 }

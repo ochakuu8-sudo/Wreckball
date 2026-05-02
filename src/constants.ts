@@ -286,7 +286,7 @@ export const SCROLL_SPEED_MIN = 260;  // 燃料が少しでもある時の最低
 // ===== 燃料ゲージ (前進リソース) =====
 // 人間を踏むと増え、カメラが前進した距離に応じて消費する。0 では停止するがゲームオーバーではない。
 export const FUEL_MAX             = 100;
-export const FUEL_INITIAL         = 35;   // ステージ1開始時の燃料。少量で始め、街から調達する
+export const FUEL_INITIAL         = 24;   // ステージ1開始時の燃料。少量で始め、街から調達する
 export const FUEL_DRAIN_PER_100PX = 20;   // 100px 前進するごとに消費する燃料
 export const FUEL_GAIN_PER_HUMAN  = 1.2;
 export const FUEL_LOW_THRESHOLD   = 18;   // この値を下回ると赤く点滅

@@ -6,6 +6,7 @@
 import * as C from './constants';
 import { rand, randInt } from './physics';
 import { writeInst, INST_F } from './renderer';
+import type { BuildingData } from './entities';
 
 const ST_INACTIVE = 0;
 const ST_RUNNING  = 1;
@@ -15,6 +16,27 @@ const ST_CRUSHED  = 2;
 const MODE_HORIZ = 0; // 横道路エリアにロック（エリア内は自由移動）
 const MODE_VERT  = 1; // 縦路地エリアにロック（エリア内は自由移動）
 const MODE_FREE  = 2; // 自由逃走（道路エリア外を走り回る）
+
+export interface HumanCrushEvent {
+  x: number;
+  y: number;
+  value: number;
+  rewardKind: HumanRewardKind;
+}
+
+export type HumanRewardKind = 'runner' | 'crowd' | 'vip' | 'marshal';
+
+const HUMAN_REWARD_KIND_NAMES: readonly HumanRewardKind[] = ['runner', 'crowd', 'vip', 'marshal'];
+const HUMAN_REWARD_KIND_IDS: Record<HumanRewardKind, number> = {
+  runner: 0,
+  crowd: 1,
+  vip: 2,
+  marshal: 3,
+};
+
+function rewardKindId(kind: HumanRewardKind): number {
+  return HUMAN_REWARD_KIND_IDS[kind] ?? HUMAN_REWARD_KIND_IDS.runner;
+}
 
 // 初期道路定義 (3本の横道路 — RIVERSIDE は川に変換したので除外)
 const INITIAL_H_ROADS: ReadonlyArray<{ y: number; tol: number }> = [
@@ -463,6 +485,8 @@ export class HumanManager {
   state:    Uint8Array   = new Uint8Array(C.MAX_HUMANS);
   timer:    Float32Array = new Float32Array(C.MAX_HUMANS);
   speed:    Float32Array = new Float32Array(C.MAX_HUMANS);
+  value:    Float32Array = new Float32Array(C.MAX_HUMANS);
+  rewardKind: Uint8Array = new Uint8Array(C.MAX_HUMANS);
   scaleX:   Float32Array = new Float32Array(C.MAX_HUMANS);
   mode:       Uint8Array   = new Uint8Array(C.MAX_HUMANS); // MODE_*
   kind:       Uint8Array   = new Uint8Array(C.MAX_HUMANS); // HUMAN_KINDS index
@@ -475,9 +499,14 @@ export class HumanManager {
 
   // 動的道路リスト (チャンクシステムで更新)
   private hRoads: Array<{ y: number; tol: number }> = [...INITIAL_H_ROADS];
+  private crushEvents: HumanCrushEvent[] = [];
 
   addRoad(y: number, tol: number) {
     this.hRoads.push({ y, tol });
+  }
+
+  clearRoads() {
+    this.hRoads = [];
   }
 
   removeRoadsBelow(minY: number) {
@@ -490,8 +519,17 @@ export class HumanManager {
 
   reset() {
     this.state.fill(ST_INACTIVE);
+    this.value.fill(1);
+    this.rewardKind.fill(HUMAN_REWARD_KIND_IDS.runner);
+    this.crushEvents = [];
     this.activeLen = 0;
     this.activeCount = 0;
+  }
+
+  consumeCrushEvents(): HumanCrushEvent[] {
+    const events = this.crushEvents;
+    this.crushEvents = [];
+    return events;
   }
 
   /** ゲーム開始時: 初期横道路3本に通行人を均等に配置 */
@@ -508,7 +546,7 @@ export class HumanManager {
    * シーン内の指定座標に 1 体配置 (道路スナップなし)。
    * pre-placed scene humans 用 — その場で待機 → ボール接近で逃走開始。
    */
-  spawnAt(cx: number, cy: number) {
+  spawnAt(cx: number, cy: number, rewardKind: HumanRewardKind = 'runner', value = 1) {
     for (let i = 0; i < C.MAX_HUMANS; i++) {
       if (this.state[i] !== ST_INACTIVE) continue;
       this.state[i] = ST_RUNNING;
@@ -517,6 +555,8 @@ export class HumanManager {
       this.py[i]    = cy;
       const spd     = rand(C.HUMAN_BASE_SPEED * 0.5, C.HUMAN_BASE_SPEED * 2.0);
       this.speed[i] = spd;
+      this.value[i] = value;
+      this.rewardKind[i] = rewardKindId(rewardKind);
       // FREE モードで開始: 道路エリアに触れたらロックされる
       this.mode[i]  = MODE_FREE;
       // 初期はゆっくり徘徊
@@ -533,7 +573,7 @@ export class HumanManager {
   }
 
   /** 指定座標付近に n 体スポーン */
-  spawn(cx: number, cy: number, n: number) {
+  spawn(cx: number, cy: number, n: number, rewardKind: HumanRewardKind = 'runner', value = 1) {
     let spawned = 0;
     for (let i = 0; i < C.MAX_HUMANS && spawned < n; i++) {
       if (this.state[i] !== ST_INACTIVE) continue;
@@ -554,6 +594,8 @@ export class HumanManager {
       this.py[i]    = spawnY;
       const spd     = rand(C.HUMAN_BASE_SPEED * 0.5, C.HUMAN_BASE_SPEED * 2.0);
       this.speed[i] = spd;
+      this.value[i] = value;
+      this.rewardKind[i] = rewardKindId(rewardKind);
       this.mode[i]  = MODE_HORIZ;
       this.vx[i]    = (Math.random() > 0.5 ? 1 : -1) * spd;
       this.vy[i]    = rand(-5, 5);
@@ -569,7 +611,14 @@ export class HumanManager {
   /** 建物破壊時: 中心から円状に吹き飛ばしてから逃走
    *  人数が多いほど散布円が大きくなる (radius ∝ √n)
    *  kindWeights を渡すと、その建物固有の人間種類分布 (例: 学校なら子供多め) が使われる */
-  spawnBlast(cx: number, cy: number, n: number, kindWeights?: ReadonlyArray<number>) {
+  spawnBlast(
+    cx: number,
+    cy: number,
+    n: number,
+    kindWeights?: ReadonlyArray<number>,
+    rewardKind: HumanRewardKind = 'crowd',
+    value = 1,
+  ) {
     const blastR = Math.sqrt(n) * 6;
     let spawned = 0;
     for (let i = 0; i < C.MAX_HUMANS && spawned < n; i++) {
@@ -585,6 +634,8 @@ export class HumanManager {
       this.vx[i]         = Math.cos(angle) * spd;
       this.vy[i]         = Math.sin(angle) * spd;
       this.speed[i]      = rand(C.HUMAN_BASE_SPEED * 0.5, C.HUMAN_BASE_SPEED * 2.0);
+      this.value[i]      = value;
+      this.rewardKind[i] = rewardKindId(rewardKind);
       this.mode[i]       = MODE_HORIZ;
       this.blastTimer[i] = rand(0.30, 0.55);
       this.timer[i]      = rand(C.HUMAN_DIR_CHANGE_MIN, C.HUMAN_DIR_CHANGE_MAX);
@@ -593,6 +644,49 @@ export class HumanManager {
       this.variant[i]    = (Math.random() * 0x100000000) >>> 0;
       spawned++;
     }
+    this.activeCount = this.activeLen;
+  }
+
+  spawnPanicHumansFromBuilding(
+    building: BuildingData,
+    count: number,
+    value: number,
+    rewardKind: HumanRewardKind = 'crowd',
+  ): void {
+    const kindWeights = getHumanWeightsForBuilding(building.size);
+    const cx = building.x + building.w / 2;
+    const cy = building.y + building.h * 0.45;
+    const blastR = Math.sqrt(Math.max(1, count)) * 7;
+    let spawned = 0;
+
+    for (let i = 0; i < C.MAX_HUMANS && spawned < count; i++) {
+      if (this.state[i] !== ST_INACTIVE) continue;
+      this.state[i] = ST_RUNNING;
+      this.activeIndices[this.activeLen++] = i;
+
+      const initAngle = Math.random() * Math.PI * 2;
+      const initR = Math.random() * blastR;
+      this.px[i] = cx + Math.cos(initAngle) * initR;
+      this.py[i] = cy + Math.sin(initAngle) * initR;
+
+      const awayX = this.px[i] - cx;
+      const awayY = this.py[i] - cy;
+      const awayLen = Math.sqrt(awayX * awayX + awayY * awayY) || 1;
+      const spd = rand(170, 390);
+      this.vx[i] = (awayX / awayLen) * spd + rand(-35, 35);
+      this.vy[i] = (awayY / awayLen) * spd + rand(-25, 45);
+      this.speed[i] = rand(C.HUMAN_BASE_SPEED * 0.75, C.HUMAN_BASE_SPEED * 2.2);
+      this.value[i] = value;
+      this.rewardKind[i] = rewardKindId(rewardKind);
+      this.mode[i] = MODE_FREE;
+      this.blastTimer[i] = rand(0.30, 0.55);
+      this.timer[i] = rand(C.HUMAN_DIR_CHANGE_MIN, C.HUMAN_DIR_CHANGE_MAX);
+      this.scaleX[i] = 1;
+      this.kind[i] = pickHumanKind(kindWeights);
+      this.variant[i] = (Math.random() * 0x100000000) >>> 0;
+      spawned++;
+    }
+
     this.activeCount = this.activeLen;
   }
 
@@ -782,6 +876,12 @@ export class HumanManager {
       const nearY = Math.max(hy, Math.min(ballY, hy + C.HUMAN_H));
       const dx = ballX - nearX, dy = ballY - nearY;
       if (dx * dx + dy * dy < ballR * ballR) {
+        this.crushEvents.push({
+          x: this.px[i],
+          y: this.py[i],
+          value: this.value[i] || 1,
+          rewardKind: HUMAN_REWARD_KIND_NAMES[this.rewardKind[i]] ?? 'runner',
+        });
         this.state[i]  = ST_INACTIVE;
         this.scaleX[i] = 0.15;
         crushed.push(i);

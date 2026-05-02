@@ -8,6 +8,7 @@ import {
   circleAABB, circleOBBOverlap, circleCircle, clampSpeed, rand, randInt
 } from './physics';
 import { writeInst, INST_F } from './renderer';
+import type { BlockIntent, PlacementRole } from './rampage-patterns';
 
 // ===== BALL =====
 
@@ -274,6 +275,9 @@ export interface BuildingData {
   flashTimer: number;
   baseColor: readonly [number,number,number];
   size: C.BuildingSize;
+  intent?: BlockIntent;
+  role?: PlacementRole;
+  patternId?: string;
   chunkKey: number;  // -1=初期都市, >=0=チャンクID
   // ウェーブシステム拡張
   rubbleTimer: number;  // > 0 かつ active=false: 瓦礫を描画
@@ -286,7 +290,7 @@ export class BuildingManager {
   buildings: BuildingData[] = [];
   private chunkMap: Map<number, BuildingData[]> = new Map();
 
-  load(defs: Array<{ x: number; y: number; size: C.BuildingSize; blockIdx?: number }>) {
+  load(defs: Array<{ x: number; y: number; size: C.BuildingSize; blockIdx?: number; intent?: BlockIntent; role?: PlacementRole; patternId?: string }>) {
     this.buildings = [];
     this.chunkMap.clear();
     this.chunkMap.set(-1, []);
@@ -315,6 +319,9 @@ export class BuildingManager {
         generation: 0,
         baseColor,
         size: d.size,
+        intent: d.intent,
+        role: d.role,
+        patternId: d.patternId,
         chunkKey: -1,
       });
       this.chunkMap.get(-1)!.push(this.buildings[this.buildings.length - 1]);
@@ -322,7 +329,7 @@ export class BuildingManager {
   }
 
   /** チャンクの建物を追加ロード (blockIdx = chunkId) */
-  loadChunk(defs: Array<{ x: number; y: number; size: C.BuildingSize; blockIdx?: number }>) {
+  loadChunk(defs: Array<{ x: number; y: number; size: C.BuildingSize; blockIdx?: number; intent?: BlockIntent; role?: PlacementRole; patternId?: string }>) {
     const chunkId = defs.length > 0 ? (defs[0].blockIdx ?? -1) : -1;
     if (!this.chunkMap.has(chunkId)) this.chunkMap.set(chunkId, []);
     const bucket = this.chunkMap.get(chunkId)!;
@@ -348,6 +355,9 @@ export class BuildingManager {
         generation: 0,
         baseColor: palette[pi],
         size: d.size,
+        intent: d.intent,
+        role: d.role,
+        patternId: d.patternId,
         chunkKey: chunkId,
       };
       this.buildings.push(b);

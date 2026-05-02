@@ -7,7 +7,7 @@ import { Renderer, writeInst, INST_F } from './renderer';
 import { InputManager } from './input';
 import { SoundEngine } from './sound';
 import { Ball, Flipper, BuildingManager, FurnitureManager, VehicleManager, VEHICLE_HUMAN_YIELD } from './entities';
-import { HumanManager, getHumanWeightsForBuilding } from './humans';
+import { HumanManager, getHumanWeightsForBuilding, type HumanRewardKind } from './humans';
 import { ParticleManager } from './particles';
 import { JuiceManager } from './juice';
 import { UIManager } from './ui';
@@ -17,10 +17,27 @@ import type { ChunkData, ChunkSpecialArea, ResolvedHorizontalRoad, ResolvedVerti
 import type { Intersection } from './grid';
 import { resolveCircleOBB, resolveCircleOBBSlide, resolveCircleCapsule, clampSpeed, rand, randInt, circleAABB } from './physics';
 import type { BuildingData, FurnitureType, VehicleType } from './entities';
+import { RaceSpeedSystem } from './race-speed';
+import {
+  clampHumanBurst,
+  computeRampageDamage,
+  getRampageBuildingProfile,
+} from './rampage-building-profiles';
+import {
+  generateInitialRampageCity,
+  generateRampageBand,
+} from './rampage-generation';
 import { gameplayStart, gameplayStop } from './sdk';
 
 const MUTE_STORAGE_KEY       = 'kaiju-pinball-muted';
 const BEST_SCORE_STORAGE_KEY = 'kaiju-pinball-best-score';
+const CHECKPOINT_FIRST_M = 35;
+const CHECKPOINT_BASE_INTERVAL_M = 45;
+const CHECKPOINT_INTERVAL_GROWTH_M = 4;
+const CHECKPOINT_INTERVAL_GROWTH_MAX_M = 28;
+const CHECKPOINT_INITIAL_TIME_SEC = 22;
+const CHECKPOINT_BONUS_TIME_SEC = 12;
+const CHECKPOINT_MAX_TIME_SEC = 24;
 
 function loadBestScore(): number {
   try {
@@ -146,6 +163,7 @@ export class Game {
 
   // 辯・侭 (莠ｺ髢薙ｒ雕上・縺ｨ蠅励∴縲∝燕騾ｲ霍晞屬縺ｫ蠢懊§縺ｦ貂帙ｋ縲・ 縺ｯ蛛懈ｭ｢縺ｧ縺ゅ▲縺ｦ繧ｲ繝ｼ繝繧ｪ繝ｼ繝舌・縺ｧ縺ｯ縺ｪ縺・
   private fuel = C.FUEL_INITIAL;
+  private race = new RaceSpeedSystem();
 
   // 迴ｾ蝨ｨ縺ｮ繧ｹ繝・・繧ｸ (HUD 陦ｨ遉ｺ繝ｻCLEAR 讀懷・逕ｨ)
   private currentStageIndex = 0;
@@ -166,6 +184,10 @@ export class Game {
   // 繝懊・繝ｫ蛛懈ｻ樊､懷・ (auto-nudge 逕ｨ)
   private stuckSeconds = 0;
   private pierceChain = 0;
+  private lastSpeedPhase = 'LAUNCH';
+  private checkpointIndex = 0;
+  private nextCheckpointMeters = CHECKPOINT_FIRST_M;
+  private checkpointTimer = CHECKPOINT_INITIAL_TIME_SEC;
 
   // 繝√Ε繝ｳ繧ｯ邂｡逅・
   private loadedChunks: Map<number, ChunkData> = new Map();
@@ -389,23 +411,27 @@ export class Game {
   }
 
   private initRun() {
+    this.race.reset();
     this.totalDestroys    = 0;
     this.totalHumans      = 0;
     this.totalScore       = 0;
     this.state            = 'playing';
     this.stateTimer       = 0;
-    this.fuel             = C.FUEL_INITIAL;
+    this.fuel             = this.race.gearChargePercent();
     this.currentStageIndex = 0;
     this.pendingStageIndex = 0;
     this.clearTriggered   = false;
     this.introActive      = false;
     this.pierceChain      = 0;
+    this.lastSpeedPhase   = this.race.phaseLabel();
+    this.resetCheckpoints();
     this.bestScore        = loadBestScore();
-    this.ui.setDistance(0);
-    this.ui.setZone(0, STAGES[0].nameEn);
-    this.ui.setFuel(C.FUEL_INITIAL);
+    this.ui.setCheckpoint(0, this.nextCheckpointMeters, this.checkpointTimer);
+    this.ui.setRaceStatus(this.race.gear, this.lastSpeedPhase, 0);
+    this.ui.setGear(this.race.gearChargePercent(), this.race.gear, this.race.gearDownThreshold());
     this.ui.setScore(0);
     this.ui.setBest(this.bestScore);
+    this.ui.hideClear();
     this.ui.hideStageClear();
   }
 
@@ -484,20 +510,14 @@ export class Game {
   }
 
   private loadCity() {
-    const cfg = getStage(1);
-    this.buildings.load(cfg.buildings);
-    this.furniture.load(cfg.furniture);
-    this.vehicles.load(cfg.vehicles);
-    this.initialCityGrounds = cfg.grounds;
-    this.bgTopR = cfg.bgTopR; this.bgTopG = cfg.bgTopG; this.bgTopB = cfg.bgTopB;
-    this.bgBottomR = cfg.bgBottomR; this.bgBottomG = cfg.bgBottomG; this.bgBottomB = cfg.bgBottomB;
+    this.buildings.load(generateInitialRampageCity());
+    this.furniture.load([]);
+    this.vehicles.load([]);
+    this.initialCityGrounds = [];
+    this.bgTopR = 0.13; this.bgTopG = 0.18; this.bgTopB = 0.28;
+    this.bgBottomR = 0.07; this.bgBottomG = 0.06; this.bgBottomB = 0.07;
     this.humans.reset();
-    this.humans.resetRoads();
-    this.humans.spawnOnStreets(20);  // 3驕楢ｷｯ ﾃ・20菴・= 60菴薙・蛻晄悄騾夊｡御ｺｺ
-    // 繧ｷ繝ｼ繝ｳ莠句燕驟咲ｽｮ縺ｮ humans (陦悟・繝ｻ隕ｳ螳｢繝ｻ騾夊｡御ｺｺ)
-    for (const h of cfg.prePlacedHumans) {
-      this.humans.spawnAt(h.x, h.y);
-    }
+    this.humans.clearRoads();
     this.particles.reset();
     this.camera.reset();
     this.loadedChunks.clear();
@@ -515,6 +535,49 @@ export class Game {
     this.stuckSeconds = 0;
     gameplayStart();
     this.sound.startMusic(this.currentStageIndex);
+  }
+
+  private resetCheckpoints(): void {
+    this.checkpointIndex = 0;
+    this.nextCheckpointMeters = CHECKPOINT_FIRST_M;
+    this.checkpointTimer = CHECKPOINT_INITIAL_TIME_SEC;
+  }
+
+  private checkpointInterval(): number {
+    const growth = Math.min(
+      CHECKPOINT_INTERVAL_GROWTH_MAX_M,
+      this.checkpointIndex * CHECKPOINT_INTERVAL_GROWTH_M,
+    );
+    return CHECKPOINT_BASE_INTERVAL_M + growth;
+  }
+
+  private updateCheckpointRace(dt: number): boolean {
+    this.checkpointTimer -= dt;
+    this.consumeReachedCheckpoints();
+    return this.checkpointTimer <= 0;
+  }
+
+  private consumeReachedCheckpoints(): void {
+    let reached = false;
+    while (this.camera.distanceMeters >= this.nextCheckpointMeters) {
+      reached = true;
+      this.checkpointIndex++;
+      this.nextCheckpointMeters += this.checkpointInterval();
+      this.checkpointTimer = Math.min(
+        CHECKPOINT_MAX_TIME_SEC,
+        this.checkpointTimer + CHECKPOINT_BONUS_TIME_SEC,
+      );
+    }
+    if (!reached) return;
+
+    const checkpointReward = this.race.onCheckpointReached();
+    this.ui.showWorldPopup(0, this.camera.y + 128, `CHECKPOINT +${CHECKPOINT_BONUS_TIME_SEC}s`, 'fuel');
+    if (checkpointReward.shiftedUp) {
+      this.ui.showWorldPopup(0, this.camera.y + 100, `GEAR ${this.race.gear}`, 'fuel');
+    }
+    this.juice.flash(0.4, 1, 0.45, 0.24);
+    this.juice.shake(3, 0.12);
+    this.sound.bumper();
   }
 
   private lastTime = 0;
@@ -544,6 +607,11 @@ export class Game {
     if (this.state === 'ball_lost') {
       this.stateTimer -= rawDt;
       this.particles.update(rawDt);
+      if (this.updateCheckpointRace(rawDt)) {
+        this.onGameOver();
+        return;
+      }
+      this.ui.setCheckpoint(this.camera.distanceMeters, this.nextCheckpointMeters, this.checkpointTimer);
       if (this.stateTimer <= 0) {
         this.ball.resetWithCamera(this.camera.y);
         this.state = 'playing';
@@ -554,11 +622,9 @@ export class Game {
     // === playing ===
     const dt = this.juice.getGameDt(rawDt);
 
-    // Fuel is forward momentum, not HP: 0 fuel stops camera movement only.
-    const fuelRatio = Math.max(0, Math.min(1, this.fuel / C.FUEL_MAX));
-    this.camera.scrollSpeed = this.fuel > 0
-      ? C.SCROLL_SPEED_MIN + (C.SCROLL_SPEED_MAX - C.SCROLL_SPEED_MIN) * fuelRatio
-      : 0;
+    this.race.update(dt);
+    this.fuel = this.race.gearChargePercent();
+    this.camera.scrollSpeed = this.race.scrollSpeed();
 
     // 繧ｫ繝｡繝ｩ譖ｴ譁ｰ (繧ｹ繧ｯ繝ｭ繝ｼ繝ｫ) 窶・蛻晄悄貍泌・荳ｭ縺ｯ蛛懈ｭ｢
     const prevCameraY = this.camera.y;
@@ -593,6 +659,8 @@ export class Game {
       }
     }
 
+    this.consumeHumanCrushRewards();
+    this.camera.scrollSpeed = this.race.scrollSpeed();
     this.buildings.update(dt);
     this.furniture.update(dt);
     this.vehicles.update(dt, this.camera.y);
@@ -601,23 +669,21 @@ export class Game {
     this._updateAmbient(dt);
     this.updateChunks();
 
+    if (this.updateCheckpointRace(rawDt)) {
+      this.onGameOver();
+      return;
+    }
+
     // 霍晞屬陦ｨ遉ｺ繧呈峩譁ｰ
-    this.ui.setDistance(this.camera.distanceMeters);
-
-    // 谺｡繧ｹ繝・・繧ｸ縺ｮ繝√Ε繝ｳ繧ｯ縺ｸ蜈･縺｣縺溘ｉ縲？UD 蛻・崛縺ｮ蜑阪↓荳ｭ髢薙け繝ｪ繧｢縺ｧ荳譌ｦ豁｢繧√ｋ
-    if (this.checkStageClear()) return;
-
-    // 迴ｾ蝨ｨ繧ｹ繝・・繧ｸ繧定ｿｽ霍｡縺励※ HUD / 閭梧勹繧呈峩譁ｰ
-    this.updateCurrentStage();
+    this.ui.setCheckpoint(this.camera.distanceMeters, this.nextCheckpointMeters, this.checkpointTimer);
 
     // 繝昴ャ繝励い繝・・繝ｬ繧､繝､繝ｼ繧偵き繝｡繝ｩ霑ｽ蠕・(繧ｳ繝ｳ繝・リ1縺､縺縺第峩譁ｰ)
     this.ui.updatePopupLayer(this.camera.y);
 
-    // Spend fuel by distance advanced. No movement means no fuel drain.
-    if (!this.introActive && cameraDeltaY > 0) {
-      this.fuel = Math.max(0, this.fuel - cameraDeltaY * (C.FUEL_DRAIN_PER_100PX / 100));
-    }
-    this.ui.setFuel(this.fuel);
+    const speedPhase = this.race.phaseLabel();
+    this.ui.setGear(this.race.gearChargePercent(), this.race.gear, this.race.gearDownThreshold());
+    this.ui.setRaceStatus(this.race.gear, speedPhase, this.race.humanChain);
+    this.updateSpeedPhaseFeedback(speedPhase);
 
     // 蛻晄悄貍泌・: 貅繧ｿ繝ｳ縺ｫ縺ｪ縺｣縺溘ｉ繧ｹ繧ｯ繝ｭ繝ｼ繝ｫ/繝峨Ξ繧､繝ｳ髢句ｧ・
     if (this.introActive && this.fuel >= C.FUEL_MAX) {
@@ -626,37 +692,40 @@ export class Game {
       this.juice.shake(C.SHAKE_LARGE_AMP, C.SHAKE_LARGE_DUR);
     }
 
-    // 笏笏 GOAL 繝√Ε繝ｳ繧ｯ蛻ｰ驕・竊・繧ｹ繧ｯ繝ｭ繝ｼ繝ｫ繝ｭ繝・け (繝ｩ繧ｹ繝懊せ謌ｦ) 笏笏
-    // 譛邨ゅメ繝｣繝ｳ繧ｯ縺後せ繝昴・繝ｳ縺輔ｌ縺溽椪髢薙↓繝ｭ繝・け繧剃ｺ育ｴ・ゅき繝｡繝ｩ縺ｯ閾ｪ辟ｶ縺ｫ繧ｹ繧ｯ繝ｭ繝ｼ繝ｫ縺・
-    // 繝ｭ繝・け菴咲ｽｮ (goal chunk center) 縺ｫ驕斐＠縺滓凾轤ｹ縺ｧ蛛懈ｭ｢縺吶ｋ縲・
-    // 窶ｻ 譛邨ゅメ繝｣繝ｳ繧ｯ縺・loadedChunks 縺ｫ蜈･縺｣縺溷ｾ後↓莠育ｴ・☆繧九％縺ｨ縺ｧ縲√せ繝昴・繝ｳ蜑阪・
-    //   misfire 繧帝亟縺・(hasGoalCastle() 縺・false 繧定ｿ斐☆迸ｬ髢薙ｒ驕ｿ縺代ｋ)縲・
-    if (this.camera.lockY === null && this.nextChunkId >= TOTAL_CHUNKS) {
-      const goalBaseY = C.WORLD_MAX_Y + (TOTAL_CHUNKS - 1) * C.CHUNK_HEIGHT;
-      this.camera.lockY = goalBaseY + 100;
-    }
+  }
 
-    // 笏笏 CLEAR 蛻､螳・笏笏
-    // 繧ｫ繝｡繝ｩ縺後Ο繝・け菴咲ｽｮ縺ｫ螳滄圀縺ｫ蛻ｰ驕・+ 蝓弱′遐ｴ螢翫＆繧後◆譎らせ縺ｧ逋ｺ轣ｫ縲・
-    // (lockY 莠育ｴ・□縺代〒縺ｯ逋ｺ轣ｫ縺帙★縲√き繝｡繝ｩ縺檎黄逅・噪縺ｫ縺昴％縺ｸ蛻ｰ驕斐☆繧九∪縺ｧ蠕・▽)
-    if (!this.clearTriggered && this.camera.lockY !== null &&
-        this.camera.y >= this.camera.lockY - 1) {
-      // 繧ｫ繝｡繝ｩ縺後Ο繝・け菴咲ｽｮ蛻ｰ驕疲ｸ医∩ 竊・縺雁沁縺ｮ遐ｴ螢翫ｒ蠕・▽
-      if (this.buildings.hasGoalCastle()) {
-        if (!this.buildings.isGoalCastleAlive()) {
-          this.clearTriggered = true;
-          this.onClear();
-          return;
-        }
-        // 蝓弱′縺ｾ縺逕溘″縺ｦ縺・ｋ 竊・繧ｯ繝ｪ繧｢縺帙★蠕・ｩ・(繝励Ξ繧､邯夊｡・
-      } else {
-        // 荳・ｸ GOAL 繝√Ε繝ｳ繧ｯ縺ｫ蝓弱′辟｡縺・ｴ蜷医・縺ｿ蜊ｳ繧ｯ繝ｪ繧｢ (譛ｬ譚･縺ｯ逋ｺ逕溘＠縺ｪ縺・
-        this.clearTriggered = true;
-        this.onClear();
-        return;
+  private consumeHumanCrushRewards(): void {
+    for (const ev of this.humans.consumeCrushEvents()) {
+      const reward = this.race.onHumanEaten(ev.rewardKind, ev.value);
+      this.fuel = this.race.gearChargePercent();
+      this.totalHumans++;
+      this.addScore(Math.round(120 * ev.value * (1 + Math.min(reward.chain, 50) * 0.08)));
+      this.ui.showSpeedPopup(ev.x, ev.y, reward.chain, reward.overdriveStarted, reward.shiftedUp);
+      if (reward.overdriveStarted) {
+        this.juice.flash(0.45, 1, 0.5, 0.28);
+        this.juice.shake(C.SHAKE_HUMAN_AMP * 1.35, C.SHAKE_HUMAN_DUR);
+      } else if (reward.shiftedUp) {
+        this.juice.flash(0.32, 0.9, 1, 0.22);
+        this.juice.shake(C.SHAKE_HUMAN_AMP * 1.15, C.SHAKE_HUMAN_DUR);
       }
     }
+  }
 
+  private updateSpeedPhaseFeedback(speedPhase: string): void {
+    if (speedPhase === this.lastSpeedPhase) return;
+    this.lastSpeedPhase = speedPhase;
+
+    if (speedPhase === 'BOOST') {
+      this.ui.showWorldPopup(0, this.camera.y + 116, 'BOOST', 'fuel');
+      this.juice.flash(0.35, 0.75, 1, 0.18);
+      this.juice.shake(2.5, 0.10);
+    } else if (speedPhase === 'REDLINE') {
+      this.ui.showWorldPopup(0, this.camera.y + 116, 'REDLINE', 'fuel');
+      this.juice.flash(1, 0.35, 0.15, 0.24);
+      this.juice.shake(4.0, 0.14);
+    } else if (speedPhase === 'CRUISE') {
+      this.ui.showWorldPopup(0, this.camera.y + 116, 'GO', 'fuel');
+    }
   }
 
   /** 迴ｾ蝨ｨ縺ｮ繝√Ε繝ｳ繧ｯ縺九ｉ謇螻槭せ繝・・繧ｸ繧貞愛螳壹＠縺ｦ HUD / 閭梧勹繧呈峩譁ｰ */
@@ -794,51 +863,40 @@ export class Game {
     if (flipperSoundNeeded) { this.sound.flipper(); this.juice.ballHitFlash(); }
     else if (wallSoundNeeded) { this.sound.wallHit(); }
 
-    // 繝繝｡繝ｼ繧ｸ縺ｯ蟶ｸ縺ｫ 1 (HP 蜊倅ｽ・= 繝偵ャ繝亥屓謨ｰ邂｡逅・
     if (bldResult) {
       const { bld } = bldResult;
-      const impactSpeed = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+      const profile = getRampageBuildingProfile(bld.size);
+      const damage = profile.guaranteedOneShot
+        ? Math.max(1, bld.hp)
+        : computeRampageDamage(bld.size, this.race.powerPercent(), this.race.isOverdrive());
+      const destroyed = this.buildings.damage(bld, damage);
 
-      if (this.canPierceBuilding(bld, impactSpeed)) {
-        const destroyed = this.buildings.damage(bld, Math.max(1, bld.hp));
+      if (destroyed) {
         b.vx *= C.PIERCE_SPEED_DAMPING;
         b.vy *= C.PIERCE_SPEED_DAMPING;
         b.lastPiercedBld = bld;
-        this.pierceChain++;
         this.sound.bumper();
         this.juice.hitstop(C.HITSTOP_SMALL);
-        this.juice.shake(C.SHAKE_HIT_AMP, C.SHAKE_HIT_DUR);
+        this.juice.shake(profile.guaranteedOneShot ? C.SHAKE_HIT_AMP : C.SHAKE_DEST_AMP, C.SHAKE_HIT_DUR);
         this.juice.ballHitFlash();
         this.particles.spawnSpark(b.x, b.y, 12);
         this.particles.spawnRubbleChunks(b.x, b.y, 5, 0.75, 0.78, 0.82);
-        this.ui.showWorldPopup(b.x, b.y + 18, `PIERCE x${this.pierceChain}`, 'pierce');
-        if (destroyed) this.onBuildingDestroyed(bld, { pierced: true });
+        this.ui.showWorldPopup(b.x, b.y + 18, profile.guaranteedOneShot ? 'SMASH' : `DMG x${damage}`, 'boom');
+        this.onBuildingDestroyed(bld, { pierced: true });
       } else {
-        this.pierceChain = 0;
-        const destroyed = this.buildings.damage(bld, 1);
-
-        if (destroyed) {
-          // 遐ｴ螢雁ｾ碁夐℃: 譌｢蟄倥・ lastPiercedBld 謖吝虚縺ｯ谿九☆縲・          b.lastPiercedBld = bld;
-          b.lastPiercedBld = bld;
-          this.onBuildingDestroyed(bld);
-        } else {
-          // 蜿榊ｰ・ 蜿咲匱菫よ焚繧帝←逕ｨ縺励※繧ｨ繝阪Ν繧ｮ繝ｼ繧貞､ｱ繧上○繧・(縺ｵ繧薙ｏ繧頑─)
-          // 縲御ｸ九°繧牙ｻｺ迚ｩ縺ｮ蠎暮擇縺ｫ蠖薙◆縺｣縺溘・ 繝懊・繝ｫ縺御ｸ雁髄縺・(vy>0) 縺ｧ蜿榊ｰ・ｾ後↓荳句髄縺・(newVy<0) 縺ｮ繧ｱ繝ｼ繧ｹ
-          // 縺薙・蝣ｴ蜷医・驩帷峩蜿崎ｻ｢縺檎匱逕溘☆繧九・縺ｧ縲∝ｼｷ繧√↓貂幄｡ｰ縺輔○縺ｦ諤昴＞蛻・ｊ蠑ｾ縺九ｌ繧区─繧呈ｶ医☆
-          const isBottomHit = b.vy > 0.5 && bldResult.newVy < 0;
-          const restitution = isBottomHit ? C.RESTITUTION_BUILDING_BOTTOM : C.RESTITUTION_BUILDING;
-          // resolveCircleAABB 縺ｯ damping=0.78 縺ｧ蜿榊ｰ・ｸ医∩ (= 譌ｧ繧ｳ繝ｼ繝峨・縺薙ｌ繧貞ｷｻ縺肴綾縺励※ 1.0 縺ｫ縺励※縺・◆)縲・          // 莉翫・ preSpd 豈斐〒蜀阪せ繧ｱ繝ｼ繝ｫ縺励※縺九ｉ restitution 繧呈寺縺代※逶ｮ讓吝渚逋ｺ菫よ焚縺ｫ謠・∴繧九・          const preSpd  = Math.sqrt(b.vx * b.vx + b.vy * b.vy) || 0.001;
-          const preSpd  = Math.sqrt(b.vx * b.vx + b.vy * b.vy) || 0.001;
-          const postSpd = Math.sqrt(bldResult.newVx ** 2 + bldResult.newVy ** 2) || 0.001;
-          const k = (preSpd / postSpd) * restitution;
-          b.vx = bldResult.newVx * k;
-          b.vy = bldResult.newVy * k;
-          b.lastPiercedBld = null;
-          this.sound.buildingHit();
-          this.juice.shake(C.SHAKE_HIT_AMP, C.SHAKE_HIT_DUR);
-          this.juice.ballHitFlash();
-          this.particles.spawnSpark(b.x, b.y, 4);
-        }
+        const isBottomHit = b.vy > 0.5 && bldResult.newVy < 0;
+        const restitution = isBottomHit ? C.RESTITUTION_BUILDING_BOTTOM : C.RESTITUTION_BUILDING;
+        const preSpd = Math.sqrt(b.vx * b.vx + b.vy * b.vy) || 0.001;
+        const postSpd = Math.sqrt(bldResult.newVx ** 2 + bldResult.newVy ** 2) || 0.001;
+        const k = (preSpd / postSpd) * restitution;
+        b.vx = bldResult.newVx * k;
+        b.vy = bldResult.newVy * k;
+        b.lastPiercedBld = null;
+        this.sound.buildingHit();
+        this.juice.shake(C.SHAKE_HIT_AMP, C.SHAKE_HIT_DUR);
+        this.juice.ballHitFlash();
+        this.particles.spawnSpark(b.x, b.y, 4);
+        this.ui.showWorldPopup(b.x, b.y + 16, `DMG x${damage}`, 'pierce');
       }
     }
 
@@ -883,9 +941,6 @@ export class Game {
         this.particles.spawnBlood(hx, hy, randInt(18, 28));
         this.particles.spawnBloodPool(hx, hy);
       }
-      this.totalHumans += crushed.length;
-      // 莠ｺ髢薙・辯・侭: 邱壼ｽ｢縺ｫ蝗槫ｾｩ
-      this.fuel = Math.min(C.FUEL_MAX, this.fuel + crushed.length * C.FUEL_GAIN_PER_HUMAN);
       this.sound.humanCrush(1);
       this.juice.shake(C.SHAKE_HUMAN_AMP, C.SHAKE_HUMAN_DUR);
     }
@@ -905,7 +960,17 @@ export class Game {
     const cx = bld.x + bld.w / 2;
     const cy = bld.y + bld.h / 2;
     this.totalDestroys++;
-    this.addScore(bld.score);
+    const roleScoreMult =
+      bld.role === 'vault' && this.race.isOverdrive() ? 3.0 :
+      bld.role === 'vault' ? 1.45 :
+      bld.role === 'release' ? 1.25 :
+      bld.role === 'stopper' ? 1.35 :
+      bld.role === 'bank' ? 1.10 :
+      1;
+    this.addScore(Math.round(bld.score * roleScoreMult));
+    if (bld.role === 'vault' && this.race.isOverdrive()) {
+      this.ui.showWorldPopup(cx, cy + bld.h * 0.5 + 34, 'VAULT CASHOUT', 'fuel');
+    }
     this.sound.buildingDestroy();
 
     // hp 4谿ｵ髫・竊・tier 1-4 縺ｫ豁｣隕丞喧縺励※繝代・繝・ぅ繧ｯ繝ｫ謨ｰ繝ｻ貍泌・蠑ｷ蠎ｦ縺ｫ菴ｿ縺・
@@ -928,14 +993,6 @@ export class Game {
       this.ui.showWorldPopup(cx, cy + bld.h * 0.5 + 12, `+${bld.score}`, 'score');
     }
 
-    const fuelBonus = FUEL_BUILDING_BONUS[bld.size] ?? 0;
-    if (fuelBonus > 0) {
-      this.fuel = Math.min(C.FUEL_MAX, this.fuel + fuelBonus);
-      this.ui.setFuel(this.fuel);
-      this.ui.showWorldPopup(cx, cy + bld.h * 0.5 + 24, `FUEL +${fuelBonus}`, 'fuel');
-      this.juice.flash(0.4, 1, 0.35, 0.18);
-    }
-
     if (bld.size === 'gas_station') {
       this.triggerGasExplosion(bld, cx, cy);
     }
@@ -945,9 +1002,44 @@ export class Game {
       this.vehicles.spawnAmbulance(cx < 0 ? 190 : -190, C.MAIN_STREET_Y);
     }
 
-    // 蟒ｺ迚ｩ遞ｮ蛻･縺ｫ蠢懊§縺滉ｺｺ髢薙・繝ｼ繝ｫ繧貞叙蠕・(蟄ｦ譬｡ 竊・蟄蝉ｾ帙∫羅髯｢ 竊・逵玖ｭｷ蟶ｫ縺ｪ縺ｩ)
-    const kindWeights = getHumanWeightsForBuilding(bld.size);
-    this.humans.spawnBlast(cx, cy, randInt(bld.humanMin, bld.humanMax), kindWeights);
+    const raw = randInt(bld.humanMin, bld.humanMax);
+    const speedBonus = 1 + Math.min(1, this.race.speedPercent() / 100) * 0.35;
+    const roleBurstMult =
+      bld.role === 'release' ? 2.25 :
+      bld.role === 'vault' && this.race.isOverdrive() ? 2.0 :
+      bld.role === 'vault' ? 1.25 :
+      bld.role === 'stopper' ? 1.2 :
+      bld.role === 'bank' ? 0.85 :
+      1;
+    const count = clampHumanBurst(bld.size, Math.floor(raw * 0.25 * speedBonus * roleBurstMult));
+    this.humans.spawnPanicHumansFromBuilding(
+      bld,
+      count,
+      this.humanValueForBuilding(bld),
+      this.humanRewardKindForBuilding(bld),
+    );
+  }
+
+  private humanValueForBuilding(bld: BuildingData): number {
+    const profile = getRampageBuildingProfile(bld.size);
+    const base =
+      profile.klass === 'small' ? 1 :
+      profile.klass === 'medium' ? 1.18 :
+      profile.klass === 'large' ? 1.42 :
+      1.75;
+    const roleMult =
+      bld.role === 'release' ? 1.25 :
+      bld.role === 'vault' && this.race.isOverdrive() ? 1.45 :
+      bld.role === 'stopper' ? 1.15 :
+      1;
+    return base * roleMult;
+  }
+
+  private humanRewardKindForBuilding(bld: BuildingData): HumanRewardKind {
+    if (bld.role === 'vault' || bld.role === 'bank') return 'vip';
+    if (bld.size === 'police_station' || bld.size === 'fire_station') return 'marshal';
+    if (bld.role === 'release' || bld.role === 'stopper') return 'crowd';
+    return 'runner';
   }
 
   private triggerGasExplosion(source: BuildingData, cx: number, cy: number) {
@@ -1012,11 +1104,12 @@ export class Game {
     this.stateTimer = 0;
     this.stuckSeconds = 0;
     this.pierceChain = 0;
-    this.fuel = Math.max(this.fuel, C.FUEL_STAGE_START_MIN);
+    this.race.ensureChargeAtLeast(C.FUEL_STAGE_START_MIN);
+    this.fuel = this.race.gearChargePercent();
     this.ball.resetWithCamera(this.camera.y);
     this.ui.hideStageClear();
-    this.ui.setZone(nextStageIndex, stage.nameEn);
-    this.ui.setFuel(this.fuel);
+    this.ui.setRaceStatus(this.race.gear, this.race.phaseLabel(), this.race.humanChain);
+    this.ui.setGear(this.race.gearChargePercent(), this.race.gear, this.race.gearDownThreshold());
     if (stage.bgTop) {
       this.bgTopR = stage.bgTop[0];
       this.bgTopG = stage.bgTop[1];
@@ -1488,8 +1581,7 @@ export class Game {
     const spawnThreshold = this.camera.top + spawnAhead;
     const despawnThreshold = this.camera.bottom - despawnBehind;
 
-    // 荳頑婿蜷代↓譁ｰ繝√Ε繝ｳ繧ｯ繧貞・隱ｭ縺ｿ繧ｹ繝昴・繝ｳ (TOTAL_CHUNKS 繧定ｶ・∴縺溘ｉ蛛懈ｭ｢)
-    while (this.nextChunkId < TOTAL_CHUNKS) {
+    while (true) {
       const nextTop = C.WORLD_MAX_Y + (this.nextChunkId + 1) * C.CHUNK_HEIGHT;
       if (nextTop > spawnThreshold) break;
       this._spawnChunk(this.nextChunkId);
@@ -1506,17 +1598,29 @@ export class Game {
 
   private _spawnChunk(chunkId: number) {
     if (this.loadedChunks.has(chunkId)) return;
-    const chunk = generateChunk(chunkId);
-    this.buildings.loadChunk(chunk.buildings);
-    this.furniture.loadChunk(chunkId, chunk.furniture);
-    this.vehicles.addChunkLanes(chunkId, chunk.roads, chunk.stageIndex);
-    for (const road of chunk.roads) {
-      this.humans.addRoad(road.y, road.h / 2 + 2);
-    }
-    // 繧ｷ繝ｼ繝ｳ莠句燕驟咲ｽｮ縺ｮ humans (陦悟・繝ｻ隕ｳ螳｢)
-    for (const h of chunk.prePlacedHumans) {
-      this.humans.spawnAt(h.x, h.y);
-    }
+    const baseY = C.WORLD_MAX_Y + chunkId * C.CHUNK_HEIGHT;
+    const buildings = generateRampageBand(baseY, C.CHUNK_HEIGHT, {
+      blockIdx: chunkId,
+      momentum: this.race.powerPercent(),
+      overdrive: this.race.isOverdrive(),
+      combo: this.race.humanChain,
+    });
+    const chunk: ChunkData = {
+      chunkId,
+      baseY,
+      stageIndex: 0,
+      roads: [],
+      horizontalRoads: [],
+      verticalRoads: [],
+      intersections: [],
+      buildings,
+      furniture: [],
+      specialAreas: [],
+      grounds: [],
+      prePlacedHumans: [],
+      clusters: [],
+    };
+    this.buildings.loadChunk(buildings);
     this.loadedChunks.set(chunkId, chunk);
   }
 
@@ -1632,9 +1736,13 @@ export class Game {
     this.ball.active = false;
     this.sound.ballLost();
     this.juice.shake(C.SHAKE_DEST_AMP, C.SHAKE_DEST_DUR);
-    // 遨ｴ縺ｫ關ｽ縺｡縺溘・繝翫Ν繝・ぅ: 辯・侭繧貞ｰ鷹㍼螟ｱ縺・・ 縺ｫ縺ｪ縺｣縺ｦ繧ゅご繝ｼ繝繧ｪ繝ｼ繝舌・縺ｫ縺ｯ縺励↑縺・・    this.fuel = Math.max(0, this.fuel - C.FUEL_BALL_LOST_COST);
-    this.fuel = Math.max(0, this.fuel - C.FUEL_BALL_LOST_COST);
-    this.ui.setFuel(this.fuel);
+    const lost = this.race.onBallLost();
+    this.fuel = this.race.gearChargePercent();
+    this.camera.scrollSpeed = this.race.scrollSpeed();
+    this.lastSpeedPhase = this.race.phaseLabel();
+    this.ui.setGear(this.race.gearChargePercent(), this.race.gear, this.race.gearDownThreshold());
+    this.ui.setRaceStatus(this.race.gear, this.lastSpeedPhase, this.race.humanChain);
+    if (lost.shiftedDown) this.ui.showWorldPopup(0, this.camera.y + 112, `GEAR ${this.race.gear}`, 'fuel');
     this.state = 'ball_lost';
     this.stateTimer = 1.0;
   }
@@ -1648,7 +1756,14 @@ export class Game {
     gameplayStop();
     this.updateBestScore();
     setTimeout(() => {
-      this.ui.showGameOver(this.camera.distanceMeters, this.totalScore, this.totalDestroys, this.totalHumans, this.bestScore);
+      this.ui.showRunOver(
+        this.camera.distanceMeters,
+        this.totalScore,
+        this.totalDestroys,
+        this.totalHumans,
+        this.race.maxHumanChain,
+        this.bestScore,
+      );
     }, 800);
   }
 
@@ -1703,17 +1818,14 @@ export class Game {
   private render() {
     const shake = this.juice.getShake();
     this.renderer.updateProjection(this.camera.y);
-    this.renderer.clear(0.35, 0.65, 0.28);
+    this.renderer.clear(0.68, 0.82, 0.92);
 
     let n = 0;
     n += this.fillWalls(SHARED_BUF, n);
-    n += this.fillChunkRoads(SHARED_BUF, n);
-    n += this.fillSpecialAreas(SHARED_BUF, n); // 蜈ｬ蝨偵・鬧占ｻ雁ｴ縺ｯ驕楢ｷｯ縺ｮ荳翫・霍ｯ蝨ｰ縺ｮ荳・
-    n += this.fillIntersections(SHARED_BUF, n); // 莠､蟾ｮ轤ｹ繝・ぅ繝・・繝ｫ繧帝％霍ｯ縺ｮ荳翫↓驥阪・繧・
+    n += this.fillRampageStreetDesign(SHARED_BUF, n);
     n += this.buildings.fillInstances(SHARED_BUF, n, this.camera.y);
     n += this.furniture.fillInstances(SHARED_BUF, n, this.camera.y);
     n += this.vehicles.fillInstances(SHARED_BUF, n, this.camera.y);
-    n += this.fillBulbs(SHARED_BUF, n);
     this.renderer.drawInstances(SHARED_BUF, n, shake);
 
     n = 0;
@@ -1725,6 +1837,213 @@ export class Game {
     this.renderer.drawInstances(SHARED_BUF, n, shake);
 
     this.renderer.drawFlash(this.juice.flashR, this.juice.flashG, this.juice.flashB, this.juice.flashAlpha);
+  }
+
+  private fillRampageStreetDesign(buf: Float32Array, start: number): number {
+    let n = start;
+    const W = C.WORLD_MAX_X - C.WORLD_MIN_X;
+    const bandH = C.CHUNK_HEIGHT;
+    const firstBand = Math.floor((this.camera.bottom - 90) / bandH) - 1;
+    const lastBand = Math.ceil((this.camera.top + 90) / bandH) + 1;
+
+    const rect = (
+      x: number, y: number, w: number, h: number,
+      r: number, g: number, b: number, a: number, rot = 0
+    ) => {
+      writeInst(buf, n++, x, y, w, h, r, g, b, a, rot);
+    };
+    const oval = (
+      x: number, y: number, w: number, h: number,
+      r: number, g: number, b: number, a: number
+    ) => {
+      writeInst(buf, n++, x, y, w, h, r, g, b, a, 0, 1);
+    };
+    const hash = (seed: number) => {
+      const v = Math.sin(seed * 91.721 + 17.13) * 43758.5453;
+      return v - Math.floor(v);
+    };
+
+    const drawPuddle = (x: number, y: number, w: number, h: number, seed: number) => {
+      oval(x, y, w, h, 0.38, 0.58, 0.68, 0.36);
+      oval(x - w * 0.10, y + h * 0.06, w * 0.72, h * 0.50, 0.58, 0.78, 0.86, 0.24);
+      rect(x + w * 0.04, y + h * 0.04, w * 0.42, 1.1, 0.92, 0.98, 1.00, 0.40, hash(seed) * 0.7 - 0.35);
+      rect(x - w * 0.16, y - h * 0.10, w * 0.28, 0.9, 0.92, 0.98, 1.00, 0.30, hash(seed + 1) * 0.6 - 0.3);
+    };
+
+    const drawDrain = (x: number, y: number, seed: number) => {
+      rect(x, y, 18, 7, 0.30, 0.32, 0.32, 0.88);
+      rect(x, y + 3.2, 18, 0.8, 0.56, 0.58, 0.56, 0.60);
+      for (let i = -3; i <= 3; i++) {
+        rect(x + i * 2.5, y, 0.55, 6.2, 0.22, 0.24, 0.24, 0.70);
+      }
+      if (hash(seed) > 0.55) {
+        rect(x - 4, y - 5.5, 14, 1.1, 0.62, 0.68, 0.58, 0.26, -0.14);
+      }
+    };
+
+    const drawPad = (x: number, y: number, w: number, h: number, seed: number) => {
+      const shade = 0.52 + hash(seed) * 0.12;
+      rect(x, y, w, h, shade * 0.96, shade, shade * 0.94, 0.98);
+      rect(x, y + h / 2 - 2.2, w, 4.4, 0.76, 0.76, 0.70, 0.62);
+      rect(x - w / 2 + 1.3, y, 2.4, h, 0.42, 0.44, 0.40, 0.38);
+      rect(x + w / 2 - 1.3, y, 2.4, h, 0.72, 0.74, 0.68, 0.42);
+      for (let gx = x - w / 2 + 14; gx < x + w / 2 - 8; gx += 16) {
+        rect(gx, y, 0.7, h - 11, 0.68, 0.69, 0.64, 0.42);
+      }
+      for (let gy = y - h / 2 + 16; gy < y + h / 2 - 8; gy += 18) {
+        rect(x, gy, w - 10, 0.75, 0.68, 0.69, 0.64, 0.38);
+      }
+
+      const signRoll = hash(seed + 5);
+      if (signRoll > 0.33) {
+        const signX = x + (hash(seed + 6) - 0.5) * w * 0.44;
+        const signY = y + h / 2 - 11;
+        const signW = 16 + hash(seed + 7) * 18;
+        if (signRoll > 0.66) {
+          rect(signX, signY, signW, 3.2, 0.88, 0.22, 0.16, 0.70);
+          rect(signX, signY + 3.8, signW * 0.7, 1.4, 0.18, 0.42, 0.86, 0.46);
+        } else {
+          rect(signX, signY, signW, 3.2, 0.94, 0.72, 0.18, 0.70);
+          rect(signX - signW * 0.2, signY - 3.3, signW * 0.45, 1.2, 0.90, 0.28, 0.18, 0.42);
+        }
+      }
+
+      drawDrain(x + (hash(seed + 11) - 0.5) * w * 0.55, y + (hash(seed + 12) - 0.5) * h * 0.48, seed + 13);
+      if (hash(seed + 20) > 0.45) {
+        drawPuddle(
+          x + (hash(seed + 21) - 0.5) * w * 0.55,
+          y + (hash(seed + 22) - 0.5) * h * 0.42,
+          14 + hash(seed + 23) * 15,
+          5 + hash(seed + 24) * 7,
+          seed + 25
+        );
+      }
+    };
+
+    const drawIntersection = (y: number, avenueW: number, crossH: number, seed: number) => {
+      rect(0, y, avenueW + 18, crossH + 18, 0.32, 0.33, 0.32, 0.98);
+      rect(0, y, avenueW + 28, 3.2, 0.95, 0.95, 0.86, 0.42);
+      rect(0, y + crossH / 2 + 6.5, avenueW + 12, 1.5, 0.96, 0.96, 0.90, 0.64);
+      rect(0, y - crossH / 2 - 6.5, avenueW + 12, 1.5, 0.96, 0.96, 0.90, 0.64);
+      for (let i = -4; i <= 4; i++) {
+        rect(i * 5, y + crossH / 2 + 8.8, 2.3, 14, 0.98, 0.98, 0.90, 0.86);
+        rect(i * 5, y - crossH / 2 - 8.8, 2.3, 14, 0.98, 0.98, 0.90, 0.86);
+        rect(-avenueW / 2 - 8.8, y + i * 5, 14, 2.3, 0.98, 0.98, 0.90, 0.86);
+        rect(avenueW / 2 + 8.8, y + i * 5, 14, 2.3, 0.98, 0.98, 0.90, 0.86);
+      }
+      if (hash(seed) > 0.5) {
+        oval(-avenueW * 0.22, y + crossH * 0.12, 12, 12, 0.28, 0.29, 0.28, 0.96);
+        oval(-avenueW * 0.22, y + crossH * 0.12, 7, 7, 0.52, 0.54, 0.50, 0.62);
+      }
+    };
+
+    for (let band = firstBand; band <= lastBand; band++) {
+      const baseY = band * bandH;
+      const centerY = baseY + bandH / 2;
+
+      rect(0, centerY, W, bandH, 0.58, 0.61, 0.55, 1);
+      rect(-173, centerY, 14, bandH, 0.34, 0.56, 0.30, 0.86);
+      rect(173, centerY, 14, bandH, 0.34, 0.56, 0.30, 0.86);
+      for (let y = baseY + 18; y < baseY + bandH; y += 38) {
+        rect(0, y, W, 1.2, 0.70, 0.72, 0.66, 0.30);
+      }
+      for (let y = baseY + 32; y < baseY + bandH; y += 92) {
+        oval(-166, y, 9, 9, 0.20, 0.48, 0.18, 0.84);
+        oval(-166, y + 2, 5, 5, 0.38, 0.66, 0.28, 0.72);
+        oval(166, y + 25, 9, 9, 0.20, 0.48, 0.18, 0.84);
+        oval(166, y + 27, 5, 5, 0.38, 0.66, 0.28, 0.72);
+      }
+
+      const pads = [
+        { x: -147, w: 58 }, { x: -89, w: 48 },
+        { x: 89, w: 48 }, { x: 147, w: 58 },
+      ];
+      for (let row = 0; row < 2; row++) {
+        const y = baseY + 50 + row * 100;
+        for (let col = 0; col < pads.length; col++) {
+          if ((band + row + col) % 2 !== 0) continue;
+          const pad = pads[col];
+          const h = 82 + hash(band * 31 + row * 9 + col) * 14;
+          drawPad(pad.x, y, pad.w, h, band * 113 + row * 29 + col * 7);
+        }
+      }
+
+      const avenueW = band % 3 === 1 ? 86 : 96;
+      rect(0, centerY, avenueW + 22, bandH + 34, 0.48, 0.49, 0.44, 0.34);
+      rect(0, centerY, avenueW, bandH + 34, 0.30, 0.31, 0.30, 1);
+      rect(-avenueW / 2 - 5.5, centerY, 8, bandH + 34, 0.68, 0.69, 0.63, 0.92);
+      rect(avenueW / 2 + 5.5, centerY, 8, bandH + 34, 0.68, 0.69, 0.63, 0.92);
+      rect(-avenueW / 2 - 1.2, centerY, 1.4, bandH + 34, 0.96, 0.96, 0.90, 0.64);
+      rect(avenueW / 2 + 1.2, centerY, 1.4, bandH + 34, 0.96, 0.88, 0.30, 0.72);
+
+      for (let y = baseY - 10; y <= baseY + bandH + 12; y += 30) {
+        rect(-11, y, 2.6, 15, 0.96, 0.96, 0.90, 0.70);
+        rect(11, y + 15, 2.6, 15, 0.96, 0.82, 0.18, 0.78);
+      }
+      for (let y = baseY + 8; y <= baseY + bandH; y += 44) {
+        rect(-avenueW / 2 - 11, y, 5, 2.2, 0.92, 0.20, 0.12, 0.70);
+        rect(avenueW / 2 + 11, y + 18, 5, 2.2, 0.96, 0.84, 0.16, 0.78);
+      }
+
+      const crossY = baseY + (band % 2 === 0 ? 62 : 138);
+      const crossH = band % 3 === 0 ? 38 : 32;
+      rect(0, crossY, W, crossH + 20, 0.50, 0.50, 0.45, 0.28);
+      rect(0, crossY, W, crossH, 0.31, 0.32, 0.31, 0.98);
+      rect(0, crossY + crossH / 2 + 4.2, W, 3.2, 0.68, 0.69, 0.63, 0.90);
+      rect(0, crossY - crossH / 2 - 4.2, W, 3.2, 0.68, 0.69, 0.63, 0.90);
+      for (let x = -170; x <= 170; x += 26) {
+        rect(x, crossY, 12, 1.35, 0.96, 0.84, 0.18, 0.82);
+      }
+      drawIntersection(crossY, avenueW, crossH, band * 19 + 4);
+
+      const sideRoadX = band % 2 === 0 ? -124 : 124;
+      rect(sideRoadX, centerY, 21, bandH + 16, 0.32, 0.33, 0.32, 0.92);
+      rect(sideRoadX - 11, centerY, 1, bandH + 16, 0.96, 0.96, 0.90, 0.58);
+      rect(sideRoadX + 11, centerY, 1, bandH + 16, 0.96, 0.84, 0.18, 0.58);
+
+      for (let i = 0; i < 10; i++) {
+        const seed = band * 97 + i * 11;
+        const x = -166 + hash(seed) * 332;
+        const y = baseY + 6 + hash(seed + 1) * (bandH - 12);
+        const len = 4 + hash(seed + 2) * 11;
+        const a = hash(seed + 3) * Math.PI;
+        const tint = hash(seed + 4);
+        rect(
+          x, y, len, 0.75,
+          tint > 0.66 ? 0.58 : 0.36,
+          tint > 0.66 ? 0.42 : 0.35,
+          tint > 0.66 ? 0.28 : 0.32,
+          tint > 0.66 ? 0.26 : 0.34,
+          a
+        );
+      }
+
+      for (let i = 0; i < 1; i++) {
+        const seed = band * 47 + i * 17;
+        drawPuddle(
+          -130 + hash(seed) * 260,
+          baseY + 20 + hash(seed + 1) * 160,
+          10 + hash(seed + 2) * 20,
+          4 + hash(seed + 3) * 9,
+          seed
+        );
+      }
+
+      if (band % 3 === 2) {
+        const arcadeY = baseY + 23;
+        rect(-122, arcadeY, 58, 8, 0.88, 0.18, 0.12, 0.46);
+        rect(-122, arcadeY + 5, 42, 2.4, 0.18, 0.44, 0.86, 0.42);
+        rect(126, arcadeY + 11, 44, 6, 0.94, 0.74, 0.18, 0.46);
+      } else if (band % 3 === 0) {
+        const hazardY = baseY + 176;
+        rect(126, hazardY, 70, 10, 0.48, 0.46, 0.36, 0.84);
+        for (let x = 94; x <= 158; x += 10) {
+          rect(x, hazardY, 7, 1.5, 0.92, 0.72, 0.18, 0.48, -0.72);
+        }
+      }
+    }
+
+    return n - start;
   }
 
   /**
