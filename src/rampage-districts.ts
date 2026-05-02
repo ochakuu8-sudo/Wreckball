@@ -1,5 +1,7 @@
 import type { RampageGenerationContext, LayoutMotifId } from './rampage-generation';
 
+type SeededRampageGenerationContext = RampageGenerationContext & { runSeed?: number };
+
 export type RampageDistrictKind =
   | 'residential'
   | 'shopping'
@@ -67,20 +69,20 @@ export function rampageNoise(seed: number, salt: number): number {
   return v - Math.floor(v);
 }
 
-export function rampageBandSeed(ctx: RampageGenerationContext): number {
+export function rampageBandSeed(ctx: SeededRampageGenerationContext): number {
   const runSeed = ctx.runSeed ?? 1337;
   return runSeed + ctx.blockIdx * 1009;
 }
 
-export function rampageBandRand(ctx: RampageGenerationContext, salt: number): number {
+export function rampageBandRand(ctx: SeededRampageGenerationContext, salt: number): number {
   return rampageNoise(rampageBandSeed(ctx), salt);
 }
 
-export function rampageRandRange(ctx: RampageGenerationContext, salt: number, min: number, max: number): number {
+export function rampageRandRange(ctx: SeededRampageGenerationContext, salt: number, min: number, max: number): number {
   return min + rampageBandRand(ctx, salt) * (max - min);
 }
 
-export function rampagePickSeeded<T>(items: readonly T[], ctx: RampageGenerationContext, salt: number): T {
+export function rampagePickSeeded<T>(items: readonly T[], ctx: SeededRampageGenerationContext, salt: number): T {
   if (items.length === 0) throw new Error('rampagePickSeeded requires at least one item');
   return items[Math.floor(rampageBandRand(ctx, salt) * items.length)];
 }
