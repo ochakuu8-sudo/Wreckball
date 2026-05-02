@@ -1,3 +1,4 @@
+import * as C from './constants';
 import { getRampageBuildingProfile } from './rampage-building-profiles';
 import type { RampageLayoutBand } from './rampage-generation';
 
@@ -34,7 +35,7 @@ function rectsOverlap(a: Rect, b: Rect): boolean {
 }
 
 function buildingRect(building: RampageLayoutBand['buildings'][number]): Rect {
-  const def = getBuildingDef(building.size);
+  const def = C.BUILDING_DEFS[building.size];
   const profile = getRampageBuildingProfile(building.size);
   const pad = profile.klass === 'small' ? 2 : profile.klass === 'medium' ? 4 : 6;
   return {
@@ -43,13 +44,6 @@ function buildingRect(building: RampageLayoutBand['buildings'][number]): Rect {
     w: def.w + pad * 2,
     h: def.h + pad * 2,
   };
-}
-
-function getBuildingDef(size: RampageLayoutBand['buildings'][number]['size']): { w: number; h: number } {
-  // Late import indirection keeps this validator cheap to use from CLI code.
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const C = require('./constants') as typeof import('./constants');
-  return C.BUILDING_DEFS[size];
 }
 
 export function measureRampageLayoutBand(layout: RampageLayoutBand): RampageLayoutMetrics {
