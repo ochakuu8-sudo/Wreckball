@@ -6,7 +6,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "lint:placement": "tsx tools/check-placement.ts"
+    "lint:placement": "tsx tools/check-placement.ts",
+    "lint:rampage-districts": "tsx tools/check-rampage-districts.ts"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
