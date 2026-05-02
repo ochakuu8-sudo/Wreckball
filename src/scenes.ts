@@ -22,9 +22,13 @@ export type SceneTier = 'bot' | 'mid' | 'midB' | 'top';
  * 建物・家具の背後に描画され、道路は上書きされる。
  */
 export type GroundType =
+  | 'city_pavement'    // ゲーム用の控えめな街路地ベース
+  | 'city_block'       // 建物群の下に敷く低コントラストな街区床
+  | 'sidewalk'         // 明るい歩道・縁石床
   | 'concrete'        // 一般的な都市 (歩道・駐車場)
   | 'stone_pavement'  // 石畳 (寺社・広場・伝統地区)
   | 'asphalt'         // 舗装道路 (ガソリンスタンド・駐車場)
+  | 'local_road'      // 生活道路・商店街通り
   | 'wood_deck'       // ウッドデッキ (カフェ・書店)
   | 'tile'            // タイル (病院・銀行・百貨店)
   | 'residential_tile' // インターロッキングブロック (住宅街の路面)

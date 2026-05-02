@@ -17,6 +17,11 @@ const MODE_HORIZ = 0; // 横道路エリアにロック（エリア内は自由�
 const MODE_VERT  = 1; // 縦路地エリアにロック（エリア内は自由移動）
 const MODE_FREE  = 2; // 自由逃走（道路エリア外を走り回る）
 
+const FORWARD_BLAST_MIN_VY = 360;
+const FORWARD_BLAST_MAX_VY = 640;
+const FORWARD_BLAST_SIDE_VX = 150;
+const FORWARD_LANDING_MIN_VY = 24;
+
 export interface HumanCrushEvent {
   x: number;
   y: number;
@@ -557,7 +562,7 @@ export class HumanManager {
       this.speed[i] = spd;
       this.value[i] = value;
       this.rewardKind[i] = rewardKindId(rewardKind);
-      // FREE モードで開始: 道路エリアに触れたらロックされる
+      // FREE モードで開始: 道路や画面端に縛られず逃走する
       this.mode[i]  = MODE_FREE;
       // 初期はゆっくり徘徊
       const angle = Math.random() * Math.PI * 2;
@@ -596,7 +601,7 @@ export class HumanManager {
       this.speed[i] = spd;
       this.value[i] = value;
       this.rewardKind[i] = rewardKindId(rewardKind);
-      this.mode[i]  = MODE_HORIZ;
+      this.mode[i]  = MODE_FREE;
       this.vx[i]    = (Math.random() > 0.5 ? 1 : -1) * spd;
       this.vy[i]    = rand(-5, 5);
       this.timer[i]    = rand(C.HUMAN_DIR_CHANGE_MIN, C.HUMAN_DIR_CHANGE_MAX);
@@ -625,19 +630,18 @@ export class HumanManager {
       if (this.state[i] !== ST_INACTIVE) continue;
       this.state[i]      = ST_RUNNING;
       this.activeIndices[this.activeLen++] = i;
-      const initAngle    = Math.random() * Math.PI * 2;
+      const side         = rand(-1, 1);
+      const forward      = rand(0.20, 1);
       const initR        = Math.random() * blastR;
-      this.px[i]         = cx + Math.cos(initAngle) * initR;
-      this.py[i]         = cy + Math.sin(initAngle) * initR;
-      const angle        = Math.random() * Math.PI * 2;
-      const spd          = rand(180, 380);
-      this.vx[i]         = Math.cos(angle) * spd;
-      this.vy[i]         = Math.sin(angle) * spd;
+      this.px[i]         = cx + side * initR;
+      this.py[i]         = cy + forward * initR * 0.55;
+      this.vx[i]         = side * rand(35, FORWARD_BLAST_SIDE_VX);
+      this.vy[i]         = rand(FORWARD_BLAST_MIN_VY * 0.8, FORWARD_BLAST_MAX_VY * 0.85);
       this.speed[i]      = rand(C.HUMAN_BASE_SPEED * 0.5, C.HUMAN_BASE_SPEED * 2.0);
       this.value[i]      = value;
       this.rewardKind[i] = rewardKindId(rewardKind);
-      this.mode[i]       = MODE_HORIZ;
-      this.blastTimer[i] = rand(0.30, 0.55);
+      this.mode[i]       = MODE_FREE;
+      this.blastTimer[i] = rand(0.22, 0.38);
       this.timer[i]      = rand(C.HUMAN_DIR_CHANGE_MIN, C.HUMAN_DIR_CHANGE_MAX);
       this.scaleX[i]     = 1;
       this.kind[i]       = pickHumanKind(kindWeights);
@@ -664,22 +668,23 @@ export class HumanManager {
       this.state[i] = ST_RUNNING;
       this.activeIndices[this.activeLen++] = i;
 
-      const initAngle = Math.random() * Math.PI * 2;
+      const side = rand(-1, 1);
+      const forward = rand(0.25, 1);
       const initR = Math.random() * blastR;
-      this.px[i] = cx + Math.cos(initAngle) * initR;
-      this.py[i] = cy + Math.sin(initAngle) * initR;
+      this.px[i] = cx + side * initR;
+      this.py[i] = cy + forward * initR * 0.55;
 
-      const awayX = this.px[i] - cx;
-      const awayY = this.py[i] - cy;
-      const awayLen = Math.sqrt(awayX * awayX + awayY * awayY) || 1;
-      const spd = rand(170, 390);
-      this.vx[i] = (awayX / awayLen) * spd + rand(-35, 35);
-      this.vy[i] = (awayY / awayLen) * spd + rand(-25, 45);
+      const speedScale =
+        rewardKind === 'vip' ? 1.12 :
+        rewardKind === 'crowd' ? 0.95 :
+        1;
+      this.vx[i] = side * rand(40, FORWARD_BLAST_SIDE_VX);
+      this.vy[i] = rand(FORWARD_BLAST_MIN_VY, FORWARD_BLAST_MAX_VY) * speedScale;
       this.speed[i] = rand(C.HUMAN_BASE_SPEED * 0.75, C.HUMAN_BASE_SPEED * 2.2);
       this.value[i] = value;
       this.rewardKind[i] = rewardKindId(rewardKind);
       this.mode[i] = MODE_FREE;
-      this.blastTimer[i] = rand(0.30, 0.55);
+      this.blastTimer[i] = rand(0.24, 0.42);
       this.timer[i] = rand(C.HUMAN_DIR_CHANGE_MIN, C.HUMAN_DIR_CHANGE_MAX);
       this.scaleX[i] = 1;
       this.kind[i] = pickHumanKind(kindWeights);
@@ -691,22 +696,12 @@ export class HumanManager {
   }
 
   update(dt: number, ballX: number, ballY: number, cameraY: number) {
-    // カメラ相対の行動範囲 (無限スクロール対応)
-    const camBottom = cameraY + C.WORLD_MIN_Y;
-    const camTop    = cameraY + C.WORLD_MAX_Y;
+    void cameraY;
 
     for (let k = 0; k < this.activeLen; k++) {
       const i = this.activeIndices[k];
 
-      // カメラ下端を大きく下回った人間は非活性化
-      if (this.py[i] < camBottom - 60) {
-        this.state[i] = ST_INACTIVE;
-        this.activeIndices[k] = this.activeIndices[--this.activeLen];
-        k--;
-        continue;
-      }
-
-      // 吹き飛ばしフェーズ: 放射状に飛散して減速
+      // 吹き飛ばしフェーズ: 前方へ流されながら減速
       if (this.blastTimer[i] > 0) {
         this.blastTimer[i] -= dt;
         const damp = Math.max(0, 1 - 4.5 * dt);
@@ -714,12 +709,10 @@ export class HumanManager {
         this.vy[i] *= damp;
         this.px[i] += this.vx[i] * dt;
         this.py[i] += this.vy[i] * dt;
-        // X のみ世界端でクランプ（Y はビル位置に依存するため固定しない）
-        this.px[i] = Math.max(C.WORLD_MIN_X + 4, Math.min(C.WORLD_MAX_X - 4, this.px[i]));
         if (this.blastTimer[i] <= 0) {
-          // blast終了後: 自由移動開始。道路エリアに入ったら出られなくなる
+          // blast終了後: 自由移動開始。道路や画面端には縛られない
           this.mode[i] = MODE_FREE;
-          this._pickNewDirection(i);
+          this._pickForwardDirection(i);
           this.timer[i] = rand(C.HUMAN_DIR_CHANGE_MIN, C.HUMAN_DIR_CHANGE_MAX);
         }
         continue;
@@ -735,80 +728,13 @@ export class HumanManager {
       // 方向転換タイマー
       this.timer[i] -= dt;
       if (this.timer[i] <= 0) {
-        this._pickNewDirection(i);
+        this._pickForwardDirection(i);
         this.timer[i] = rand(C.HUMAN_DIR_CHANGE_MIN, C.HUMAN_DIR_CHANGE_MAX);
       }
 
       // 位置更新
       this.px[i] += this.vx[i] * boost * dt;
       this.py[i] += this.vy[i] * boost * dt;
-
-      const cm = this.mode[i];
-      const px = this.px[i];
-      const py = this.py[i];
-
-      if (cm === MODE_FREE) {
-        // 自由逃走: 道路/路地エリアに触れたら即ロック（以降出られない）
-        for (const r of this.hRoads) {
-          if (Math.abs(this.py[i] - r.y) <= r.tol) {
-            this.mode[i] = MODE_HORIZ;
-            this._pickNewDirection(i);
-            this.timer[i] = rand(C.HUMAN_DIR_CHANGE_MIN, C.HUMAN_DIR_CHANGE_MAX);
-            break;
-          }
-        }
-        if (this.mode[i] === MODE_FREE) {
-          for (const a of V_ALLEYS) {
-            if (Math.abs(this.px[i] - a.x) <= a.tol) {
-              this.mode[i] = MODE_VERT;
-              this._pickNewDirection(i);
-              this.timer[i] = rand(C.HUMAN_DIR_CHANGE_MIN, C.HUMAN_DIR_CHANGE_MAX);
-              break;
-            }
-          }
-        }
-      } else if (cm === MODE_HORIZ) {
-        // 道路エリア: Y方向の境界で速度反発（エリア外に出られない）
-        const road = this._findRoad(py);
-        if (road) {
-          if (this.py[i] < road.y - road.tol) { this.py[i] = road.y - road.tol; this.vy[i] =  Math.abs(this.vy[i]); }
-          if (this.py[i] > road.y + road.tol) { this.py[i] = road.y + road.tol; this.vy[i] = -Math.abs(this.vy[i]); }
-        }
-        // 路地交差点で確率的に VERT へ乗り換え
-        for (const a of V_ALLEYS) {
-          if (Math.abs(this.px[i] - a.x) <= a.tol && Math.random() < 0.008) {
-            this.mode[i] = MODE_VERT;
-            this._pickNewDirection(i);
-            this.timer[i] = rand(C.HUMAN_DIR_CHANGE_MIN, C.HUMAN_DIR_CHANGE_MAX);
-            break;
-          }
-        }
-
-      } else if (cm === MODE_VERT) {
-        // 路地エリア: X方向の境界で速度反発
-        const alley = this._findAlley(px);
-        if (alley) {
-          if (this.px[i] < alley.x - alley.tol) { this.px[i] = alley.x - alley.tol; this.vx[i] =  Math.abs(this.vx[i]); }
-          if (this.px[i] > alley.x + alley.tol) { this.px[i] = alley.x + alley.tol; this.vx[i] = -Math.abs(this.vx[i]); }
-        }
-        // 道路交差点で確率的に HORIZ へ乗り換え
-        for (const r of this.hRoads) {
-          if (Math.abs(this.py[i] - r.y) <= r.tol && Math.random() < 0.008) {
-            this.mode[i] = MODE_HORIZ;
-            this._pickNewDirection(i);
-            this.timer[i] = rand(C.HUMAN_DIR_CHANGE_MIN, C.HUMAN_DIR_CHANGE_MAX);
-            break;
-          }
-        }
-      }
-
-      // X方向: 画面端で逃走完了 → INACTIVE
-      if (this.px[i] < C.WORLD_MIN_X + 5 || this.px[i] > C.WORLD_MAX_X - 5) {
-        this.state[i] = ST_INACTIVE;
-        this.activeIndices[k] = this.activeIndices[--this.activeLen];
-        k--;
-        continue;
-      }
 
       // 潰れアニメ回復
       if (this.scaleX[i] < 1) {
@@ -862,6 +788,12 @@ export class HumanManager {
     const angle = Math.random() * Math.PI * 2;
     this.vx[i] = Math.cos(angle) * spd;
     this.vy[i] = Math.sin(angle) * spd;
+  }
+
+  private _pickForwardDirection(i: number) {
+    const spd = this.speed[i] * rand(1.0, 1.55);
+    this.vx[i] = rand(-0.55, 0.55) * spd;
+    this.vy[i] = rand(FORWARD_LANDING_MIN_VY, Math.max(FORWARD_LANDING_MIN_VY + 1, spd));
   }
 
   checkCrush(ballX: number, ballY: number, ballR: number): number[] {

@@ -53,13 +53,13 @@ export function getRampageBuildingProfile(size: C.BuildingSize): RampageBuilding
   const klass = getRampageBuildingClass(size);
   switch (klass) {
     case 'small':
-      return { klass, spawnWeight: 80, hpScale: 1.0, minBurst: 1, maxBurst: 5, guaranteedOneShot: true };
+      return { klass, spawnWeight: 80, hpScale: 1.0, minBurst: 3, maxBurst: 9, guaranteedOneShot: true };
     case 'medium':
-      return { klass, spawnWeight: 15, hpScale: 1.0, minBurst: 5, maxBurst: 15, guaranteedOneShot: false };
+      return { klass, spawnWeight: 15, hpScale: 1.0, minBurst: 6, maxBurst: 24, guaranteedOneShot: false };
     case 'large':
-      return { klass, spawnWeight: 4, hpScale: 1.35, minBurst: 12, maxBurst: 30, guaranteedOneShot: false };
+      return { klass, spawnWeight: 4, hpScale: 1.35, minBurst: 15, maxBurst: 48, guaranteedOneShot: false };
     case 'huge':
-      return { klass, spawnWeight: 1, hpScale: 2.0, minBurst: 30, maxBurst: 60, guaranteedOneShot: false };
+      return { klass, spawnWeight: 1, hpScale: 2.0, minBurst: 30, maxBurst: 78, guaranteedOneShot: false };
   }
 }
 

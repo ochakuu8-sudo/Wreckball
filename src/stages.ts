@@ -36,7 +36,74 @@ export interface GroundTile {
   h: number;
 }
 
-export interface PrePlacedHumanDef { x: number; y: number; }
+export type GroundDecalKind =
+  | 'plaza'
+  | 'tile_patch'
+  | 'feed_mark'
+  | 'score_mark'
+  | 'impact_mark'
+  | 'crowd_spot'
+  | 'danger_stripe'
+  | 'tire'
+  | 'stain'
+  | 'shadow_patch'
+  | 'lot_frame'
+  | 'shop_stripe'
+  | 'planter'
+  | 'curb_line'
+  | 'crosswalk'
+  | 'parking_stall'
+  | 'lane_mark'
+  | 'road_end_cap'
+  | 'junction_pad'
+  | 'facade_row'
+  | 'frontage_pad'
+  | 'driveway'
+  | 'curb_corner';
+
+export interface GroundDecal {
+  kind: GroundDecalKind;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rot?: number;
+  alpha?: number;
+}
+
+export type RoadSurfaceKind = 'road' | 'sidewalk' | 'junction';
+export type RoadSurfaceClass = 'avenue' | 'street' | 'lane';
+export type RoadSurfaceOrientation = 'h' | 'v';
+
+export interface RoadSurface {
+  kind: RoadSurfaceKind;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  cls: RoadSurfaceClass;
+  orientation?: RoadSurfaceOrientation;
+}
+
+export type RoadDecalKind = 'curb' | 'lane_mark' | 'crosswalk' | 'endpoint_cap';
+
+export interface RoadDecal {
+  kind: RoadDecalKind;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rot?: number;
+  alpha?: number;
+  cls?: RoadSurfaceClass;
+}
+
+export interface PrePlacedHumanDef {
+  x: number;
+  y: number;
+  rewardKind?: 'runner' | 'crowd' | 'vip' | 'marshal';
+  value?: number;
+}
 
 export interface ScenePlacement {
   buildings: BuildingDef[];
@@ -120,7 +187,10 @@ export interface ChunkData {
   furniture: FurnitureDef[];
   specialAreas: ChunkSpecialArea[];
   grounds: GroundTile[];
-  prePlacedHumans: Array<{ x: number; y: number }>;
+  groundDecals: GroundDecal[];
+  roadSurfaces: RoadSurface[];
+  roadDecals: RoadDecal[];
+  prePlacedHumans: PrePlacedHumanDef[];
   clusters?: SemanticCluster[];
 }
 
@@ -390,6 +460,9 @@ export function generateChunk(chunkId: number): ChunkData {
     furniture: [],
     specialAreas: [],
     grounds: [],
+    groundDecals: [],
+    roadSurfaces: [],
+    roadDecals: [],
     prePlacedHumans: [],
     clusters: [],
   };
@@ -430,6 +503,9 @@ export function placeCity(): ScenePlacement {
     furniture: out.furniture,
     specialAreas: [],
     grounds: out.grounds!,
+    groundDecals: [],
+    roadSurfaces: [],
+    roadDecals: [],
     prePlacedHumans: out.humans!,
     clusters: [],
   };

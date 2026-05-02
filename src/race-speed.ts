@@ -13,38 +13,37 @@ export interface HumanEatReward {
 const MIN_GEAR = 1;
 const MAX_GEAR = 5;
 
-const GEAR_SPEED_MIN = [0, 0, 22, 40, 62, 86];
-const GEAR_SPEED_MAX = [0, 34, 55, 78, 104, 128];
-const GEAR_SHIFT_BOOST = [0, 10, 14, 18, 22, 28];
+const MAX_SCROLL_SPEED = 600;
+const GEAR_SPEED_MIN = [0, 0, 88, 170, 300, 440];
+const GEAR_SPEED_MAX = [0, 90, 180, 320, 470, MAX_SCROLL_SPEED];
+const GEAR_SHIFT_BOOST = [0, 18, 32, 48, 66, 82];
 const CHARGE_INITIAL = 28;
 const GEAR_UP_THRESHOLD = 100;
-const GEAR_DOWN_THRESHOLD = 12;
+const GEAR_DOWN_THRESHOLD = 10;
 const DOWNSHIFT_RECOVERY_CHARGE = 58;
-const CHARGE_DECAY_GRACE_SEC = 1.15;
-const CHARGE_DECAY_BASE_PER_SEC = 7.5;
-const CHARGE_DECAY_GEAR_SCALE = 1.35;
-const BOOST_DECAY_PER_SEC = 24;
-const SPEED_RISE_PER_SEC = 220;
-const SPEED_FALL_PER_SEC = 18;
-const CHAIN_WINDOW_SEC = 2.35;
-const OVERDRIVE_DURATION_SEC = 3.0;
+const CHARGE_DECAY_GRACE_SEC = 1.35;
+const CHARGE_DECAY_BASE_PER_SEC = 6.8;
+const CHARGE_DECAY_GEAR_SCALE = 1.25;
+const SPEED_DECAY_BASE_PER_SEC = 5;
+const SPEED_DECAY_RATIO_PER_SEC = 0.16;
+const HUMAN_SPEED_KICK = 3;
+const CHAIN_WINDOW_SEC = 2.8;
+const OVERDRIVE_DURATION_SEC = 3.8;
 const CHECKPOINT_CHARGE_GAIN = 8;
-const CHECKPOINT_BOOST = 8;
 const BALL_LOST_CHARGE_DROP = 34;
-const BALL_LOST_SPEED_DROP = 48;
+const BALL_LOST_SPEED_DROP = 62;
 
 const HUMAN_REWARD: Record<HumanRewardKind, { charge: number; boost: number; chainScale: number }> = {
-  runner:  { charge: 18, boost: 16, chainScale: 0.85 },
-  crowd:   { charge: 12, boost: 12, chainScale: 0.65 },
-  vip:     { charge: 34, boost: 28, chainScale: 1.05 },
-  marshal: { charge: 22, boost: 18, chainScale: 0.90 },
+  runner:  { charge: 22, boost: 9, chainScale: 0.92 },
+  crowd:   { charge: 14, boost: 6, chainScale: 0.70 },
+  vip:     { charge: 40, boost: 18, chainScale: 1.10 },
+  marshal: { charge: 26, boost: 11, chainScale: 0.96 },
 };
 
 export class RaceSpeedSystem {
   gear = MIN_GEAR;
   gearCharge = CHARGE_INITIAL;
   raceSpeed = 0;
-  boostSpeed = 0;
   runTime = 0;
   humanChain = 0;
   maxHumanChain = 0;
@@ -56,7 +55,6 @@ export class RaceSpeedSystem {
     this.gear = MIN_GEAR;
     this.gearCharge = CHARGE_INITIAL;
     this.raceSpeed = 0;
-    this.boostSpeed = 0;
     this.runTime = 0;
     this.humanChain = 0;
     this.maxHumanChain = 0;
@@ -69,7 +67,6 @@ export class RaceSpeedSystem {
     this.runTime += dt;
     this.timeSinceHuman += dt;
     this.overdriveTimer = Math.max(0, this.overdriveTimer - dt);
-    this.boostSpeed = Math.max(0, this.boostSpeed - BOOST_DECAY_PER_SEC * dt);
 
     if (this.chainTimer > 0) {
       this.chainTimer = Math.max(0, this.chainTimer - dt);
@@ -98,7 +95,7 @@ export class RaceSpeedSystem {
     const chainMult = 1 + Math.min(this.humanChain, 40) * 0.025 * reward.chainScale;
     const chargeGain = reward.charge * value * chainMult;
     this.gearCharge += chargeGain;
-    this.boostSpeed += reward.boost * value * Math.min(1.9, chainMult);
+    this.addSpeedKick(HUMAN_SPEED_KICK);
 
     let shiftedUp = false;
     let overdriveStarted = false;
@@ -106,7 +103,6 @@ export class RaceSpeedSystem {
       const overflow = this.gearCharge - GEAR_UP_THRESHOLD;
       this.gear++;
       this.gearCharge = Math.min(82, 20 + overflow * 0.45);
-      this.boostSpeed += GEAR_SHIFT_BOOST[this.gear];
       shiftedUp = true;
     }
 
@@ -114,11 +110,7 @@ export class RaceSpeedSystem {
       this.gearCharge = GEAR_UP_THRESHOLD;
       overdriveStarted = this.overdriveTimer <= 0;
       this.overdriveTimer = Math.max(this.overdriveTimer, OVERDRIVE_DURATION_SEC);
-      this.boostSpeed += 18;
     }
-
-    this.raceSpeed = Math.max(this.raceSpeed, this.targetSpeed() * 0.78);
-    this.raceSpeed = Math.min(this.maxScrollSpeed(), this.raceSpeed + reward.boost * 0.55);
 
     return {
       chargeGain,
@@ -132,19 +124,20 @@ export class RaceSpeedSystem {
   onCheckpointReached(): { shiftedUp: boolean } {
     const before = this.gear;
     this.gearCharge = Math.min(GEAR_UP_THRESHOLD, this.gearCharge + CHECKPOINT_CHARGE_GAIN);
-    this.boostSpeed += CHECKPOINT_BOOST;
     if (this.gearCharge >= GEAR_UP_THRESHOLD && this.gear < MAX_GEAR) {
       this.gear++;
-      this.gearCharge = 24;
-      this.boostSpeed += GEAR_SHIFT_BOOST[this.gear];
+      this.gearCharge = 32;
     }
     return { shiftedUp: this.gear > before };
+  }
+
+  addRushBoost(amount: number): void {
+    void amount;
   }
 
   onBallLost(): { shiftedDown: boolean } {
     const before = this.gear;
     this.gearCharge = Math.max(0, this.gearCharge - BALL_LOST_CHARGE_DROP);
-    this.boostSpeed = 0;
     this.raceSpeed = Math.max(0, this.raceSpeed - BALL_LOST_SPEED_DROP);
     this.humanChain = 0;
     this.chainTimer = 0;
@@ -206,26 +199,31 @@ export class RaceSpeedSystem {
   private shiftDown(): void {
     this.gear = Math.max(MIN_GEAR, this.gear - 1);
     this.gearCharge = this.gear > MIN_GEAR ? DOWNSHIFT_RECOVERY_CHARGE : Math.max(this.gearCharge, 0);
-    this.raceSpeed = Math.min(this.raceSpeed, this.targetSpeed());
+    this.raceSpeed = Math.min(this.raceSpeed, this.speedLimit());
   }
 
-  private targetSpeed(): number {
+  private speedLimit(): number {
     const t = smoothstep(clamp01(this.gearCharge / GEAR_UP_THRESHOLD));
     const base = lerp(GEAR_SPEED_MIN[this.gear], GEAR_SPEED_MAX[this.gear], t);
-    const overdriveBonus = this.isOverdrive() ? 18 : 0;
-    return Math.min(this.maxScrollSpeed(), base + this.boostSpeed + overdriveBonus);
+    const overdriveBonus = this.isOverdrive() ? 48 : 0;
+    return Math.min(this.maxScrollSpeed(), base + overdriveBonus);
+  }
+
+  private addSpeedKick(amount: number): void {
+    const limit = this.speedLimit();
+    const cap = Math.max(this.raceSpeed, limit);
+    this.raceSpeed = clamp(this.raceSpeed + Math.max(0, amount), 0, cap);
   }
 
   private updateRaceSpeed(dt: number): void {
-    const target = this.targetSpeed();
-    const rate = target > this.raceSpeed ? SPEED_RISE_PER_SEC : SPEED_FALL_PER_SEC;
-    const maxStep = rate * dt;
-    const delta = clamp(target - this.raceSpeed, -maxStep, maxStep);
-    this.raceSpeed = clamp(this.raceSpeed + delta, 0, this.maxScrollSpeed());
+    const limit = this.speedLimit();
+    const decay = SPEED_DECAY_BASE_PER_SEC + this.raceSpeed * SPEED_DECAY_RATIO_PER_SEC;
+    const decayedSpeed = Math.max(0, this.raceSpeed - decay * dt);
+    this.raceSpeed = Math.min(decayedSpeed, limit);
   }
 
   private maxScrollSpeed(): number {
-    return GEAR_SPEED_MAX[MAX_GEAR] + 26;
+    return MAX_SCROLL_SPEED;
   }
 }
 

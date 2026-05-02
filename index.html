@@ -136,19 +136,19 @@
     #life-wrap {
       position: absolute; top: 8px; left: 8px; right: 8px;
       height: 14px;
-      background: #1a1208;
-      border: 2px solid #e8a020;
+      background: #071318;
+      border: 2px solid #52d8ff;
       border-radius: 0;
       box-shadow:
         inset 0 0 0 1px #000,
-        0 0 6px rgba(232, 160, 32, 0.55),
+        0 0 6px rgba(82, 216, 255, 0.45),
         2px 2px 0 #000;
       overflow: hidden;
       image-rendering: pixelated;
     }
     /* ラベル "FUEL" をバー内左上に */
     #life-wrap::before {
-      content: 'GEAR';
+      content: 'CP';
       position: absolute; top: 1px; left: 3px;
       font-family: 'Press Start 2P', monospace;
       font-size: 6px; letter-spacing: 1px;
@@ -158,7 +158,7 @@
       pointer-events: none;
     }
     #life-wrap::after {
-      content: 'G' attr(data-gear);
+      content: attr(data-cp);
       position: absolute; top: 1px; right: 4px;
       font-family: 'Press Start 2P', monospace;
       font-size: 6px; letter-spacing: 1px;
@@ -176,7 +176,7 @@
           transparent 0 28px,
           rgba(0,0,0,0.55) 28px 30px),
         linear-gradient(180deg,
-          #fff080 0%, #ffd020 35%, #cc8800 100%);
+          #eaffff 0%, #64e6ff 38%, #1ca3e8 100%);
       transition: width 0.12s linear;
     }
     /* ピンチ (low): オレンジ赤 + 点滅 */
@@ -185,8 +185,7 @@
         repeating-linear-gradient(90deg,
           transparent 0 28px,
           rgba(0,0,0,0.6) 28px 30px),
-        linear-gradient(180deg,
-          #ffaa55 0%, #ff5522 40%, #aa2200 100%);
+        linear-gradient(180deg, #fff2a0 0%, #ffb32a 42%, #d76a00 100%);
     }
     #life-wrap.low  { animation: blink 0.5s steps(2) infinite; }
     /* クリティカル (crit): 純赤 + 高速点滅 */
@@ -198,6 +197,106 @@
         linear-gradient(180deg, #ff6644 0%, #dd0000 50%, #881100 100%);
     }
     #life-wrap.crit { animation: blink 0.18s steps(2) infinite; }
+
+    #speedometer {
+      position: absolute;
+      top: 27px; right: 66px;
+      width: 72px; height: 47px;
+      z-index: 4;
+      pointer-events: none;
+      font-family: 'Press Start 2P', monospace;
+      image-rendering: pixelated;
+      color: #eaffff;
+      text-shadow: 1px 1px 0 #000;
+    }
+    #speedometer::before {
+      content: 'SPD';
+      position: absolute;
+      top: 0; left: 2px;
+      font-size: 5px;
+      color: #52d8ff;
+    }
+    #speedometer::after {
+      content: attr(data-phase);
+      position: absolute;
+      right: 0; top: 0;
+      max-width: 45px;
+      overflow: hidden;
+      white-space: nowrap;
+      font-size: 5px;
+      color: #ffd020;
+      text-align: right;
+    }
+    #speedometer[data-phase="boost"]::after,
+    #speedometer[data-phase="redline"]::after,
+    #speedometer[data-phase="overdrive"]::after {
+      color: #ff7448;
+    }
+    .speedometer-arc {
+      position: absolute;
+      left: 7px; top: 9px;
+      width: 58px; height: 31px;
+      border: 2px solid #52d8ff;
+      border-bottom: 0;
+      border-radius: 58px 58px 0 0;
+      background:
+        radial-gradient(circle at 50% 100%, #0a1014 0 8px, transparent 9px),
+        conic-gradient(from 244deg at 50% 100%,
+          #44ff88 0deg 48deg,
+          #ffd020 48deg 86deg,
+          #ff5533 86deg 126deg,
+          transparent 126deg 236deg,
+          #44ff88 236deg 284deg,
+          #ffd020 284deg 322deg,
+          #ff5533 322deg 360deg);
+      box-shadow: inset 0 0 0 1px #000, 2px 2px 0 #000;
+      overflow: hidden;
+    }
+    .speedometer-arc::before {
+      content: '';
+      position: absolute;
+      left: 6px; right: 6px; bottom: 2px;
+      height: 2px;
+      background:
+        repeating-linear-gradient(90deg,
+          #eaffff 0 2px,
+          transparent 2px 11px);
+      opacity: 0.75;
+    }
+    #speed-needle {
+      position: absolute;
+      left: 50%; bottom: 3px;
+      width: 2px; height: 25px;
+      margin-left: -1px;
+      background: #ff3328;
+      transform-origin: 50% 100%;
+      transform: rotate(-116deg);
+      box-shadow: 1px 1px 0 #000;
+    }
+    .speed-pivot {
+      position: absolute;
+      left: 50%; bottom: -2px;
+      width: 8px; height: 8px;
+      margin-left: -4px;
+      border-radius: 50%;
+      background: #eaffff;
+      border: 2px solid #141414;
+    }
+    #speed-value {
+      position: absolute;
+      left: 7px; bottom: 0;
+      width: 40px;
+      font-size: 7px;
+      color: #fff;
+      text-align: center;
+    }
+    #speed-gear {
+      position: absolute;
+      right: 7px; bottom: 0;
+      font-size: 7px;
+      color: #ffd020;
+      text-align: right;
+    }
 
     /* ミュートボタン — 右上にピクセル風の小さなボタン */
     #mute-btn {
@@ -444,7 +543,8 @@
     body.screenshot-mode #zone-display,
     body.screenshot-mode #score-display,
     body.screenshot-mode #best-display,
-    body.screenshot-mode #life-wrap {
+    body.screenshot-mode #life-wrap,
+    body.screenshot-mode #speedometer {
       display: none !important;
     }
     /* screenshot モード: 背景を純黒に (周囲のグロー削除) */
@@ -517,7 +617,15 @@
     <div id="zone-display">CHAIN x0</div>
     <div id="score-display">SCORE 0</div>
     <div id="best-display" class="hidden">BEST 0</div>
-    <div id="life-wrap" data-gear="1"><div id="life-fill"></div></div>
+    <div id="life-wrap" data-cp="35m"><div id="life-fill"></div></div>
+    <div id="speedometer" data-phase="launch">
+      <div class="speedometer-arc">
+        <div id="speed-needle"></div>
+        <div class="speed-pivot"></div>
+      </div>
+      <div id="speed-value">000</div>
+      <div id="speed-gear">G1</div>
+    </div>
     <button id="pause-btn" type="button" aria-label="Pause">II</button>
     <button id="mute-btn" type="button" aria-label="Toggle sound">&#9834;</button>
   </div>

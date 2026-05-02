@@ -70,6 +70,7 @@ export const RAMPAGE_PATTERNS: readonly BlockPattern[] = [
       { lane: 'rightOuter', y: 0.70, sizes: SMALL_SHOPS, role: 'release', xJitter: 8, yJitter: 8 },
       { lane: 'leftInner', y: 0.76, sizes: SMALL_SHOPS, role: 'feeder', xJitter: 5, yJitter: 5 },
       { lane: 'rightInner', y: 0.55, sizes: SMALL_HOMES, role: 'feeder', xJitter: 5, yJitter: 5 },
+      { lane: 'center', y: 0.38, sizes: SMALL_SHOPS, role: 'feeder', xJitter: 6, yJitter: 6 },
       { lane: 'leftOuter', y: 0.90, sizes: SMALL_HOMES, role: 'bank', xJitter: 8, yJitter: 6 },
     ],
   },
@@ -87,6 +88,7 @@ export const RAMPAGE_PATTERNS: readonly BlockPattern[] = [
       { lane: 'rightOuter', y: 0.62, sizes: RELEASE_BUILDINGS, role: 'release', xJitter: 7, yJitter: 6 },
       { lane: 'rightOuter', y: 0.86, sizes: SMALL_SHOPS, role: 'bank', xJitter: 7, yJitter: 6 },
       { lane: 'leftInner', y: 0.35, sizes: SMALL_HOMES, role: 'feeder', xOffset: -8, xJitter: 4, yJitter: 5 },
+      { lane: 'center', y: 0.56, sizes: SMALL_SHOPS, role: 'feeder', xJitter: 7, yJitter: 5 },
     ],
   },
   {
@@ -103,6 +105,7 @@ export const RAMPAGE_PATTERNS: readonly BlockPattern[] = [
       { lane: 'leftOuter', y: 0.62, sizes: RELEASE_BUILDINGS, role: 'release', xJitter: 7, yJitter: 6 },
       { lane: 'leftOuter', y: 0.86, sizes: SMALL_SHOPS, role: 'bank', xJitter: 7, yJitter: 6 },
       { lane: 'rightInner', y: 0.35, sizes: SMALL_HOMES, role: 'feeder', xOffset: 8, xJitter: 4, yJitter: 5 },
+      { lane: 'center', y: 0.56, sizes: SMALL_SHOPS, role: 'feeder', xJitter: 7, yJitter: 5 },
     ],
   },
   {
@@ -118,6 +121,7 @@ export const RAMPAGE_PATTERNS: readonly BlockPattern[] = [
       { lane: 'rightOuter', y: 0.68, sizes: RELEASE_BUILDINGS, role: 'release', xJitter: 8, yJitter: 7 },
       { lane: 'rightOuter', y: 0.18, sizes: SMALL_HOMES, role: 'bank', xJitter: 8, yJitter: 6 },
       { lane: 'leftOuter', y: 0.82, sizes: SMALL_SHOPS, role: 'release', xJitter: 8, yJitter: 7 },
+      { lane: 'center', y: 0.58, sizes: SMALL_SHOPS, role: 'feeder', xJitter: 5, yJitter: 4 },
     ],
   },
   {
@@ -133,6 +137,7 @@ export const RAMPAGE_PATTERNS: readonly BlockPattern[] = [
       { lane: 'leftOuter', y: 0.78, sizes: SMALL_SHOPS, role: 'bank', xJitter: 8, yJitter: 7 },
       { lane: 'rightOuter', y: 0.88, sizes: SMALL_HOMES, role: 'bank', xJitter: 8, yJitter: 6 },
       { lane: 'leftOuter', y: 0.18, sizes: SMALL_SHOPS, role: 'feeder', xJitter: 8, yJitter: 6 },
+      { lane: 'center', y: 0.55, sizes: MEDIUM_STOPS, role: 'stopper', xJitter: 4, yJitter: 5 },
     ],
   },
   {
@@ -145,6 +150,7 @@ export const RAMPAGE_PATTERNS: readonly BlockPattern[] = [
       { lane: 'leftOuter', y: 0.26, sizes: SMALL_HOMES, role: 'bank', xJitter: 10, yJitter: 8 },
       { lane: 'rightOuter', y: 0.68, sizes: SMALL_SHOPS, role: 'release', xJitter: 10, yJitter: 8 },
       { lane: 'leftInner', y: 0.78, sizes: SMALL_SHOPS, role: 'feeder', xOffset: -8, xJitter: 5, yJitter: 6 },
+      { lane: 'center', y: 0.46, sizes: SMALL_HOMES, role: 'bank', xJitter: 8, yJitter: 7 },
     ],
   },
 ];

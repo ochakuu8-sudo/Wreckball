@@ -159,8 +159,20 @@ export class Flipper {
     let ny = this.isLeft ?  c : -c;
     if (ny < 0.3) ny = 0.3;
     const len = Math.sqrt(nx * nx + ny * ny);
-    const power = C.FLIPPER_POWER * (1.0 + Math.abs(this.angularVel) * 0.01);
-    return [(nx / len) * power, (ny / len) * power];
+    nx /= len;
+    ny /= len;
+
+    const tx = c;
+    const ty = s;
+    const tangentSpeed = vx * tx + vy * ty;
+    const normalSpeed = vx * nx + vy * ny;
+    const snap = 1 + Math.min(0.10, Math.abs(this.angularVel) * 0.008);
+    const targetNormal = Math.max(normalSpeed, C.FLIPPER_POWER * snap);
+    const preservedTangent = tangentSpeed * 0.92;
+    return [
+      tx * preservedTangent + nx * targetNormal,
+      ty * preservedTangent + ny * targetNormal,
+    ];
   }
 }
 
@@ -3166,12 +3178,15 @@ export class FurnitureManager {
           break;
         }
         case 'fountain': {
-          // 俯瞰: 円形噴水池 + 水面 + 噴射
-          writeInst(buf, n++, item.x + 3, item.y - 3, 19, 19, 0, 0, 0, 0.18, 0, 1);
-          writeInst(buf, n++, item.x, item.y, 17, 17, 0.50, 0.68, 0.82, 1, 0, 1);
-          writeInst(buf, n++, item.x, item.y, 13, 13, 0.35, 0.65, 0.95, 0.85, 0, 1);
+          // 俯瞰: 低い石組みの噴水。発光リングに見えないよう矩形ベースで描く。
+          writeInst(buf, n++, item.x + 2, item.y - 2, 18, 13, 0, 0, 0, 0.14);
+          writeInst(buf, n++, item.x, item.y, 18, 13, 0.58, 0.56, 0.50, 1);
+          writeInst(buf, n++, item.x, item.y, 13, 8, 0.28, 0.52, 0.66, 0.82);
+          writeInst(buf, n++, item.x, item.y - 4.5, 15, 1.2, 0.78, 0.76, 0.68, 0.65);
+          writeInst(buf, n++, item.x, item.y + 4.5, 15, 1.2, 0.42, 0.40, 0.36, 0.45);
           if (item.hp > 0) {
-            writeInst(buf, n++, item.x, item.y, 6, 6, 0.65, 0.90, 1.0, 0.7, 0, 1);
+            writeInst(buf, n++, item.x - 3, item.y, 1.2, 6, 0.82, 0.92, 0.98, 0.55);
+            writeInst(buf, n++, item.x + 3, item.y, 1.2, 6, 0.82, 0.92, 0.98, 0.55);
           }
           break;
         }
@@ -3801,28 +3816,28 @@ export class FurnitureManager {
           break;
         }
         case 'plaza_tile_circle': {
-          // 広場の円形タイル模様
-          writeInst(buf, n++, item.x, item.y, 40, 40, 0.78, 0.72, 0.62, 1, 0, 1); // 外輪
-          writeInst(buf, n++, item.x, item.y, 30, 30, 0.82, 0.76, 0.65, 0.95, 0, 1); // 中輪
-          writeInst(buf, n++, item.x, item.y, 18, 18, 0.72, 0.65, 0.55, 0.9, 0, 1); // 内輪
-          writeInst(buf, n++, item.x, item.y, 6, 6, 0.55, 0.48, 0.38, 0.85, 0, 1); // 中心
-          // 放射状の線 4 本
-          writeInst(buf, n++, item.x, item.y, 38, 0.8, 0.62, 0.55, 0.45, 0.7);
-          writeInst(buf, n++, item.x, item.y, 0.8, 38, 0.62, 0.55, 0.45, 0.7);
+          // 広場の敷石。ターゲット状に見えないよう、薄い角タイルにする。
+          writeInst(buf, n++, item.x, item.y, 36, 24, 0.68, 0.64, 0.54, 0.44);
+          writeInst(buf, n++, item.x, item.y - 6, 34, 0.8, 0.48, 0.45, 0.38, 0.28);
+          writeInst(buf, n++, item.x, item.y + 6, 34, 0.8, 0.78, 0.74, 0.62, 0.26);
+          writeInst(buf, n++, item.x - 9, item.y, 0.8, 20, 0.50, 0.47, 0.40, 0.22);
+          writeInst(buf, n++, item.x + 9, item.y, 0.8, 20, 0.78, 0.74, 0.62, 0.20);
           break;
         }
         case 'fountain_large': {
-          // 大噴水
-          writeInst(buf, n++, item.x, item.y, 24, 24, 0.55, 0.55, 0.52, 1, 0, 1); // 外輪石
-          writeInst(buf, n++, item.x, item.y, 20, 20, 0.35, 0.58, 0.75, 1, 0, 1); // 水面
-          writeInst(buf, n++, item.x, item.y, 14, 14, 0.45, 0.68, 0.82, 0.85, 0, 1); // 明部
-          writeInst(buf, n++, item.x, item.y, 5, 5, 0.60, 0.58, 0.52, 1, 0, 1); // 中央像台
-          writeInst(buf, n++, item.x, item.y - 1, 2.5, 5, 0.82, 0.78, 0.70, 1); // 像
-          // 噴射 4 方向
-          writeInst(buf, n++, item.x, item.y - 6, 1, 4, 0.85, 0.92, 0.98, 0.75);
-          writeInst(buf, n++, item.x, item.y + 6, 1, 4, 0.85, 0.92, 0.98, 0.75);
-          writeInst(buf, n++, item.x - 6, item.y, 4, 1, 0.85, 0.92, 0.98, 0.75);
-          writeInst(buf, n++, item.x + 6, item.y, 4, 1, 0.85, 0.92, 0.98, 0.75);
+          // 大噴水。画面上で白い楕円に見えないよう、石枠と水面を低彩度にする。
+          writeInst(buf, n++, item.x + 2, item.y - 2, 28, 20, 0, 0, 0, 0.15);
+          writeInst(buf, n++, item.x, item.y, 29, 20, 0.58, 0.56, 0.50, 1);
+          writeInst(buf, n++, item.x, item.y, 22, 13, 0.30, 0.52, 0.64, 0.86);
+          writeInst(buf, n++, item.x, item.y - 8, 24, 1.3, 0.78, 0.76, 0.68, 0.62);
+          writeInst(buf, n++, item.x, item.y + 8, 24, 1.3, 0.42, 0.40, 0.36, 0.44);
+          writeInst(buf, n++, item.x - 12, item.y, 1.3, 14, 0.44, 0.42, 0.38, 0.48);
+          writeInst(buf, n++, item.x + 12, item.y, 1.3, 14, 0.78, 0.76, 0.68, 0.46);
+          writeInst(buf, n++, item.x, item.y, 5, 6, 0.60, 0.58, 0.52, 1);
+          writeInst(buf, n++, item.x, item.y - 1, 2.5, 5, 0.82, 0.78, 0.70, 0.82);
+          writeInst(buf, n++, item.x, item.y - 5, 1, 5, 0.82, 0.92, 0.98, 0.56);
+          writeInst(buf, n++, item.x - 5, item.y, 5, 1, 0.82, 0.92, 0.98, 0.42);
+          writeInst(buf, n++, item.x + 5, item.y, 5, 1, 0.82, 0.92, 0.98, 0.42);
           break;
         }
         case 'taxi_rank_sign': {

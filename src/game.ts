@@ -13,7 +13,7 @@ import { JuiceManager } from './juice';
 import { UIManager } from './ui';
 import { Camera } from './camera';
 import { getStage, generateChunk, getInitialCityRoadData, chunkInfoFor, TOTAL_CHUNKS, STAGES } from './stages';
-import type { ChunkData, ChunkSpecialArea, ResolvedHorizontalRoad, ResolvedVerticalRoad, GroundTile } from './stages';
+import type { ChunkData, ChunkSpecialArea, ResolvedHorizontalRoad, ResolvedVerticalRoad, GroundTile, GroundDecal, RoadDecal, RoadSurface } from './stages';
 import type { Intersection } from './grid';
 import { resolveCircleOBB, resolveCircleOBBSlide, resolveCircleCapsule, clampSpeed, rand, randInt, circleAABB } from './physics';
 import type { BuildingData, FurnitureType, VehicleType } from './entities';
@@ -24,8 +24,8 @@ import {
   getRampageBuildingProfile,
 } from './rampage-building-profiles';
 import {
-  generateInitialRampageCity,
-  generateRampageBand,
+  generateInitialRampageLayout,
+  generateRampageLayoutBand,
 } from './rampage-generation';
 import { gameplayStart, gameplayStop } from './sdk';
 
@@ -186,6 +186,7 @@ export class Game {
   private pierceChain = 0;
   private lastSpeedPhase = 'LAUNCH';
   private checkpointIndex = 0;
+  private lastCheckpointMeters = 0;
   private nextCheckpointMeters = CHECKPOINT_FIRST_M;
   private checkpointTimer = CHECKPOINT_INITIAL_TIME_SEC;
 
@@ -196,6 +197,9 @@ export class Game {
   private _ambientAccumulator = 0;
   // 蛻晄悄驛ｽ蟶ゅ・繧ｻ繝ｫ蝨ｰ髱｢繧ｿ繧､繝ｫ
   private initialCityGrounds: GroundTile[] = [];
+  private initialGroundDecals: GroundDecal[] = [];
+  private initialRoadSurfaces: RoadSurface[] = [];
+  private initialRoadDecals: RoadDecal[] = [];
 
   private bgTopR = 0.52; private bgTopG = 0.74; private bgTopB = 0.96;
   private bgBottomR = 0.38; private bgBottomG = 0.36; private bgBottomB = 0.33;
@@ -426,9 +430,9 @@ export class Game {
     this.lastSpeedPhase   = this.race.phaseLabel();
     this.resetCheckpoints();
     this.bestScore        = loadBestScore();
-    this.ui.setCheckpoint(0, this.nextCheckpointMeters, this.checkpointTimer);
+    this.ui.setCheckpoint(0, this.nextCheckpointMeters, this.checkpointTimer, 0);
     this.ui.setRaceStatus(this.race.gear, this.lastSpeedPhase, 0);
-    this.ui.setGear(this.race.gearChargePercent(), this.race.gear, this.race.gearDownThreshold());
+    this.ui.setSpeedometer(this.race.scrollSpeed(), this.race.speedPercent(), this.race.gear, this.lastSpeedPhase);
     this.ui.setScore(0);
     this.ui.setBest(this.bestScore);
     this.ui.hideClear();
@@ -510,14 +514,23 @@ export class Game {
   }
 
   private loadCity() {
-    this.buildings.load(generateInitialRampageCity());
-    this.furniture.load([]);
+    const initialLayout = generateInitialRampageLayout();
+    const initialBuildings = initialLayout.flatMap((band) => band.buildings);
+    const initialFurniture = initialLayout.flatMap((band) => band.furniture);
+    this.buildings.load(initialBuildings);
+    this.furniture.load(initialFurniture);
     this.vehicles.load([]);
-    this.initialCityGrounds = [];
-    this.bgTopR = 0.13; this.bgTopG = 0.18; this.bgTopB = 0.28;
-    this.bgBottomR = 0.07; this.bgBottomG = 0.06; this.bgBottomB = 0.07;
+    this.initialCityGrounds = initialLayout.flatMap((band) => band.grounds);
+    this.initialGroundDecals = initialLayout.flatMap((band) => band.groundDecals);
+    this.initialRoadSurfaces = initialLayout.flatMap((band) => band.roadSurfaces);
+    this.initialRoadDecals = initialLayout.flatMap((band) => band.roadDecals);
+    this.bgTopR = 0.56; this.bgTopG = 0.78; this.bgTopB = 0.97;
+    this.bgBottomR = 0.48; this.bgBottomG = 0.56; this.bgBottomB = 0.40;
     this.humans.reset();
     this.humans.clearRoads();
+    for (const human of initialLayout.flatMap((band) => band.humans)) {
+      this.humans.spawnAt(human.x, human.y, human.rewardKind ?? 'runner', human.value ?? 1);
+    }
     this.particles.reset();
     this.camera.reset();
     this.loadedChunks.clear();
@@ -539,8 +552,15 @@ export class Game {
 
   private resetCheckpoints(): void {
     this.checkpointIndex = 0;
+    this.lastCheckpointMeters = 0;
     this.nextCheckpointMeters = CHECKPOINT_FIRST_M;
     this.checkpointTimer = CHECKPOINT_INITIAL_TIME_SEC;
+  }
+
+  private checkpointProgressPercent(): number {
+    const span = Math.max(1, this.nextCheckpointMeters - this.lastCheckpointMeters);
+    const progress = (this.camera.distanceMeters - this.lastCheckpointMeters) / span;
+    return Math.max(0, Math.min(100, progress * 100));
   }
 
   private checkpointInterval(): number {
@@ -561,7 +581,9 @@ export class Game {
     let reached = false;
     while (this.camera.distanceMeters >= this.nextCheckpointMeters) {
       reached = true;
+      const reachedCheckpoint = this.nextCheckpointMeters;
       this.checkpointIndex++;
+      this.lastCheckpointMeters = reachedCheckpoint;
       this.nextCheckpointMeters += this.checkpointInterval();
       this.checkpointTimer = Math.min(
         CHECKPOINT_MAX_TIME_SEC,
@@ -575,7 +597,7 @@ export class Game {
     if (checkpointReward.shiftedUp) {
       this.ui.showWorldPopup(0, this.camera.y + 100, `GEAR ${this.race.gear}`, 'fuel');
     }
-    this.juice.flash(0.4, 1, 0.45, 0.24);
+    this.juice.flash(0.4, 1, 0.45, 0.08);
     this.juice.shake(3, 0.12);
     this.sound.bumper();
   }
@@ -611,7 +633,13 @@ export class Game {
         this.onGameOver();
         return;
       }
-      this.ui.setCheckpoint(this.camera.distanceMeters, this.nextCheckpointMeters, this.checkpointTimer);
+      this.ui.setCheckpoint(
+        this.camera.distanceMeters,
+        this.nextCheckpointMeters,
+        this.checkpointTimer,
+        this.checkpointProgressPercent(),
+      );
+      this.ui.setSpeedometer(this.race.scrollSpeed(), this.race.speedPercent(), this.race.gear, this.race.phaseLabel());
       if (this.stateTimer <= 0) {
         this.ball.resetWithCamera(this.camera.y);
         this.state = 'playing';
@@ -675,13 +703,18 @@ export class Game {
     }
 
     // 霍晞屬陦ｨ遉ｺ繧呈峩譁ｰ
-    this.ui.setCheckpoint(this.camera.distanceMeters, this.nextCheckpointMeters, this.checkpointTimer);
+    this.ui.setCheckpoint(
+      this.camera.distanceMeters,
+      this.nextCheckpointMeters,
+      this.checkpointTimer,
+      this.checkpointProgressPercent(),
+    );
 
     // 繝昴ャ繝励い繝・・繝ｬ繧､繝､繝ｼ繧偵き繝｡繝ｩ霑ｽ蠕・(繧ｳ繝ｳ繝・リ1縺､縺縺第峩譁ｰ)
     this.ui.updatePopupLayer(this.camera.y);
 
     const speedPhase = this.race.phaseLabel();
-    this.ui.setGear(this.race.gearChargePercent(), this.race.gear, this.race.gearDownThreshold());
+    this.ui.setSpeedometer(this.race.scrollSpeed(), this.race.speedPercent(), this.race.gear, speedPhase);
     this.ui.setRaceStatus(this.race.gear, speedPhase, this.race.humanChain);
     this.updateSpeedPhaseFeedback(speedPhase);
 
@@ -701,12 +734,14 @@ export class Game {
       this.totalHumans++;
       this.addScore(Math.round(120 * ev.value * (1 + Math.min(reward.chain, 50) * 0.08)));
       this.ui.showSpeedPopup(ev.x, ev.y, reward.chain, reward.overdriveStarted, reward.shiftedUp);
+      const chainPunch = Math.min(1.5, 0.45 + reward.chain * 0.035);
+      this.juice.shake(C.SHAKE_HUMAN_AMP * chainPunch, 0.075, 0.04);
       if (reward.overdriveStarted) {
-        this.juice.flash(0.45, 1, 0.5, 0.28);
-        this.juice.shake(C.SHAKE_HUMAN_AMP * 1.35, C.SHAKE_HUMAN_DUR);
+        this.juice.flash(1, 0.92, 0.28, 0.13);
+        this.juice.shake(C.SHAKE_HUMAN_AMP * 2.0, C.SHAKE_HUMAN_DUR * 1.25, 0.10);
       } else if (reward.shiftedUp) {
-        this.juice.flash(0.32, 0.9, 1, 0.22);
-        this.juice.shake(C.SHAKE_HUMAN_AMP * 1.15, C.SHAKE_HUMAN_DUR);
+        this.juice.flash(0.32, 0.9, 1, 0.10);
+        this.juice.shake(C.SHAKE_HUMAN_AMP * 1.65, C.SHAKE_HUMAN_DUR * 1.15, 0.08);
       }
     }
   }
@@ -717,14 +752,14 @@ export class Game {
 
     if (speedPhase === 'BOOST') {
       this.ui.showWorldPopup(0, this.camera.y + 116, 'BOOST', 'fuel');
-      this.juice.flash(0.35, 0.75, 1, 0.18);
-      this.juice.shake(2.5, 0.10);
+      this.juice.shake(4.2, 0.13, 0.08);
     } else if (speedPhase === 'REDLINE') {
       this.ui.showWorldPopup(0, this.camera.y + 116, 'REDLINE', 'fuel');
-      this.juice.flash(1, 0.35, 0.15, 0.24);
-      this.juice.shake(4.0, 0.14);
+      this.juice.flash(1, 0.35, 0.15, 0.11);
+      this.juice.shake(6.0, 0.18, 0.10);
     } else if (speedPhase === 'CRUISE') {
       this.ui.showWorldPopup(0, this.camera.y + 116, 'GO', 'fuel');
+      this.juice.shake(2.0, 0.08, 0.04);
     }
   }
 
@@ -768,7 +803,7 @@ export class Game {
     const speed = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
     // 1 substep 縺ゅ◆繧翫・遘ｻ蜍暮㍼繧・ball 蜊雁ｾ・悴貅縺ｫ謚代∴縺ｦ繝医Φ繝阪Μ繝ｳ繧ｰ繧帝亟縺・
     // (ball radius = 9, 騾溷ｺｦ 40 縺ｧ繧・7 substep 縺ｧ ~5.7 px/substep)
-    const SUB = Math.max(1, Math.min(8, Math.ceil(speed / 6)));
+    const SUB = Math.max(1, Math.min(10, Math.ceil(speed / 5)));
     const dts = dt / SUB;
 
     // 雋ｫ騾壻ｸｭ縺ｮ蟒ｺ迚ｩ縺九ｉ謚懊￠縺溘ｉ lastPiercedBld 繧偵け繝ｪ繧｢
@@ -796,7 +831,7 @@ export class Game {
       // 蝮・ normalDamping=0.22 縺ｧ霍ｳ縺ｭ縺ｫ縺上￥縲》angentFriction=0.965 縺ｧ霆｢縺後ｊ縺ｪ縺後ｉ
       // 縺昴％縺昴％繧ｨ繝阪Ν繧ｮ繝ｼ繧貞炎縺・(蠕蠕ｩ 1 蝗槭￥繧峨＞縺ｧ遨ｴ縺ｫ關ｽ縺｡繧区嫌蜍輔ｒ迢吶≧)縲・
       for (const slope of [this.getSlopeL(), this.getSlopeR()]) {
-        const res = resolveCircleOBBSlide(b.x, b.y, r, b.vx, b.vy, slope, 0.22, 0.965);
+        const res = resolveCircleOBBSlide(b.x, b.y, r, b.vx, b.vy, slope, 0.16, 0.992);
         if (res) {
           const preSpd = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
           [b.x, b.y, b.vx, b.vy] = res;
@@ -840,7 +875,7 @@ export class Game {
           }
           break;  // 繝舌Φ繝代・縺ｧ蜃ｦ逅・＠縺溘・縺ｧ縺薙・繝輔Μ繝・ヱ繝ｼ縺ｮ譛ｬ菴薙・鬟帙・縺・
         }
-        const res = resolveCircleCapsule(b.x, b.y, r, b.vx, b.vy, fl.getOBB(), 0.15, 0.998);
+        const res = resolveCircleCapsule(b.x, b.y, r, b.vx, b.vy, fl.getOBB(), 0.32, 0.996);
         if (res) {
           const preSpd = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
           [b.x, b.y, b.vx, b.vy] = res;
@@ -972,12 +1007,20 @@ export class Game {
       this.ui.showWorldPopup(cx, cy + bld.h * 0.5 + 34, 'VAULT CASHOUT', 'fuel');
     }
     this.sound.buildingDestroy();
+    const profile = getRampageBuildingProfile(bld.size);
+    const rushBoost =
+      profile.klass === 'huge' ? 22 :
+      profile.klass === 'large' ? 17 :
+      profile.klass === 'medium' ? 11 :
+      7;
+    this.race.addRushBoost(rushBoost);
+    this.camera.scrollSpeed = this.race.scrollSpeed();
 
     // hp 4谿ｵ髫・竊・tier 1-4 縺ｫ豁｣隕丞喧縺励※繝代・繝・ぅ繧ｯ繝ｫ謨ｰ繝ｻ貍泌・蠑ｷ蠎ｦ縺ｫ菴ｿ縺・
     const sc = Math.ceil(bld.maxHp / 4); // hp4竊・, hp8竊・, hp11竊・, hp13竊・
     const isLarge = bld.maxHp >= 11;
-    if (isLarge) { this.juice.hitstop(C.HITSTOP_LARGE); this.juice.shake(C.SHAKE_LARGE_AMP, C.SHAKE_LARGE_DUR, 1.5); this.juice.flash(1, 1, 1, 0.40); }
-    else         { this.juice.hitstop(C.HITSTOP_SMALL);  this.juice.shake(C.SHAKE_DEST_AMP, C.SHAKE_DEST_DUR); this.juice.flash(1, 0.85, 0.4, 0.18); }
+    if (isLarge) { this.juice.hitstop(C.HITSTOP_LARGE); this.juice.shake(C.SHAKE_LARGE_AMP, C.SHAKE_LARGE_DUR, 1.5); this.juice.flash(1, 0.92, 0.55, 0.12); }
+    else         { this.juice.hitstop(C.HITSTOP_SMALL);  this.juice.shake(C.SHAKE_DEST_AMP, C.SHAKE_DEST_DUR); }
 
     const [dr, dg, db] = bld.baseColor;
     const top = bld.y + bld.h;
@@ -1003,15 +1046,15 @@ export class Game {
     }
 
     const raw = randInt(bld.humanMin, bld.humanMax);
-    const speedBonus = 1 + Math.min(1, this.race.speedPercent() / 100) * 0.35;
+    const speedBonus = 1 + Math.min(1, this.race.speedPercent() / 100) * 0.15;
     const roleBurstMult =
-      bld.role === 'release' ? 2.25 :
-      bld.role === 'vault' && this.race.isOverdrive() ? 2.0 :
-      bld.role === 'vault' ? 1.25 :
-      bld.role === 'stopper' ? 1.2 :
+      bld.role === 'release' ? 1.65 :
+      bld.role === 'vault' && this.race.isOverdrive() ? 1.55 :
+      bld.role === 'vault' ? 1.12 :
+      bld.role === 'stopper' ? 1.1 :
       bld.role === 'bank' ? 0.85 :
       1;
-    const count = clampHumanBurst(bld.size, Math.floor(raw * 0.25 * speedBonus * roleBurstMult));
+    const count = clampHumanBurst(bld.size, Math.floor(raw * 0.48 * speedBonus * roleBurstMult));
     this.humans.spawnPanicHumansFromBuilding(
       bld,
       count,
@@ -1109,7 +1152,7 @@ export class Game {
     this.ball.resetWithCamera(this.camera.y);
     this.ui.hideStageClear();
     this.ui.setRaceStatus(this.race.gear, this.race.phaseLabel(), this.race.humanChain);
-    this.ui.setGear(this.race.gearChargePercent(), this.race.gear, this.race.gearDownThreshold());
+    this.ui.setSpeedometer(this.race.scrollSpeed(), this.race.speedPercent(), this.race.gear, this.race.phaseLabel());
     if (stage.bgTop) {
       this.bgTopR = stage.bgTop[0];
       this.bgTopG = stage.bgTop[1];
@@ -1599,7 +1642,7 @@ export class Game {
   private _spawnChunk(chunkId: number) {
     if (this.loadedChunks.has(chunkId)) return;
     const baseY = C.WORLD_MAX_Y + chunkId * C.CHUNK_HEIGHT;
-    const buildings = generateRampageBand(baseY, C.CHUNK_HEIGHT, {
+    const layout = generateRampageLayoutBand(baseY, C.CHUNK_HEIGHT, {
       blockIdx: chunkId,
       momentum: this.race.powerPercent(),
       overdrive: this.race.isOverdrive(),
@@ -1613,14 +1656,21 @@ export class Game {
       horizontalRoads: [],
       verticalRoads: [],
       intersections: [],
-      buildings,
-      furniture: [],
+      buildings: layout.buildings,
+      furniture: layout.furniture,
       specialAreas: [],
-      grounds: [],
-      prePlacedHumans: [],
+      grounds: layout.grounds,
+      groundDecals: layout.groundDecals,
+      roadSurfaces: layout.roadSurfaces,
+      roadDecals: layout.roadDecals,
+      prePlacedHumans: layout.humans,
       clusters: [],
     };
-    this.buildings.loadChunk(buildings);
+    this.buildings.loadChunk(layout.buildings);
+    this.furniture.loadChunk(chunkId, layout.furniture);
+    for (const human of layout.humans) {
+      this.humans.spawnAt(human.x, human.y, human.rewardKind ?? 'runner', human.value ?? 1);
+    }
     this.loadedChunks.set(chunkId, chunk);
   }
 
@@ -1740,7 +1790,7 @@ export class Game {
     this.fuel = this.race.gearChargePercent();
     this.camera.scrollSpeed = this.race.scrollSpeed();
     this.lastSpeedPhase = this.race.phaseLabel();
-    this.ui.setGear(this.race.gearChargePercent(), this.race.gear, this.race.gearDownThreshold());
+    this.ui.setSpeedometer(this.race.scrollSpeed(), this.race.speedPercent(), this.race.gear, this.lastSpeedPhase);
     this.ui.setRaceStatus(this.race.gear, this.lastSpeedPhase, this.race.humanChain);
     if (lost.shiftedDown) this.ui.showWorldPopup(0, this.camera.y + 112, `GEAR ${this.race.gear}`, 'fuel');
     this.state = 'ball_lost';
@@ -1822,7 +1872,9 @@ export class Game {
 
     let n = 0;
     n += this.fillWalls(SHARED_BUF, n);
-    n += this.fillRampageStreetDesign(SHARED_BUF, n);
+    n += this.fillChunkRoads(SHARED_BUF, n);
+    n += this.fillRoadLayer(SHARED_BUF, n);
+    n += this.fillSpeedLines(SHARED_BUF, n);
     n += this.buildings.fillInstances(SHARED_BUF, n, this.camera.y);
     n += this.furniture.fillInstances(SHARED_BUF, n, this.camera.y);
     n += this.vehicles.fillInstances(SHARED_BUF, n, this.camera.y);
@@ -1837,6 +1889,159 @@ export class Game {
     this.renderer.drawInstances(SHARED_BUF, n, shake);
 
     this.renderer.drawFlash(this.juice.flashR, this.juice.flashG, this.juice.flashB, this.juice.flashAlpha);
+  }
+
+  private drawRoadSurface(buf: Float32Array, idx: number, surface: RoadSurface): number {
+    const roadColor =
+      surface.cls === 'avenue' ? [0.18, 0.20, 0.21] :
+      surface.cls === 'street' ? [0.22, 0.24, 0.24] :
+      [0.28, 0.30, 0.28];
+    let n = idx;
+    if (surface.kind === 'sidewalk') {
+      writeInst(buf, n++, surface.x, surface.y, surface.w, surface.h, 0.86, 0.80, 0.62, 1);
+      if ((surface.orientation ?? 'h') === 'h') {
+        writeInst(buf, n++, surface.x, surface.y - surface.h * 0.42, surface.w, 0.7, 0.98, 0.90, 0.66, 0.44);
+        writeInst(buf, n++, surface.x, surface.y + surface.h * 0.42, surface.w, 0.7, 0.34, 0.35, 0.31, 0.44);
+      } else {
+        writeInst(buf, n++, surface.x - surface.w * 0.42, surface.y, 0.7, surface.h, 0.34, 0.35, 0.31, 0.44);
+        writeInst(buf, n++, surface.x + surface.w * 0.42, surface.y, 0.7, surface.h, 0.98, 0.90, 0.66, 0.44);
+      }
+      return n - idx;
+    }
+
+    const [r, g, b] = roadColor;
+    const isJunction = surface.kind === 'junction';
+    writeInst(buf, n++, surface.x, surface.y, surface.w, surface.h, r, g, b, 1);
+    if (isJunction) {
+      writeInst(buf, n++, surface.x, surface.y, surface.w * 0.82, surface.h * 0.82, r * 1.08, g * 1.08, b * 1.05, 0.62);
+    } else if ((surface.orientation ?? 'v') === 'v') {
+      writeInst(buf, n++, surface.x - surface.w * 0.42, surface.y, 0.8, surface.h, 0.08, 0.10, 0.11, 0.52);
+      writeInst(buf, n++, surface.x + surface.w * 0.42, surface.y, 0.8, surface.h, 0.50, 0.48, 0.40, 0.30);
+    } else {
+      writeInst(buf, n++, surface.x, surface.y - surface.h * 0.42, surface.w, 0.8, 0.50, 0.48, 0.40, 0.30);
+      writeInst(buf, n++, surface.x, surface.y + surface.h * 0.42, surface.w, 0.8, 0.08, 0.10, 0.11, 0.52);
+    }
+    return n - idx;
+  }
+
+  private drawRoadDecal(buf: Float32Array, idx: number, decal: RoadDecal): number {
+    const rot = decal.rot ?? 0;
+    const alpha = decal.alpha ?? 1;
+    const ux = Math.cos(rot);
+    const uy = Math.sin(rot);
+    let n = idx;
+    const write = (
+      x: number,
+      y: number,
+      w: number,
+      h: number,
+      rgba: readonly [number, number, number, number],
+      r = rot,
+    ) => writeInst(buf, n++, x, y, w, h, rgba[0], rgba[1], rgba[2], rgba[3] * alpha, r);
+
+    switch (decal.kind) {
+      case 'curb':
+        write(decal.x, decal.y, decal.w, decal.h, [0.30, 0.32, 0.29, 0.84]);
+        return n - idx;
+      case 'lane_mark': {
+        const count = Math.max(3, Math.floor(decal.w / 28));
+        for (let i = 0; i < count; i++) {
+          const p = -decal.w * 0.42 + i * (decal.w * 0.84 / Math.max(1, count - 1));
+          write(decal.x + ux * p, decal.y + uy * p, decal.cls === 'avenue' ? 14 : 8, decal.h, [0.92, 0.84, 0.56, 0.72]);
+        }
+        return n - idx;
+      }
+      case 'crosswalk': {
+        write(decal.x, decal.y, decal.w, decal.h, [0.18, 0.20, 0.19, 0.24]);
+        const stripes = Math.max(4, Math.floor(decal.w / 7));
+        for (let i = 0; i < stripes; i++) {
+          const p = -decal.w * 0.44 + i * (decal.w * 0.88 / Math.max(1, stripes - 1));
+          write(decal.x + ux * p, decal.y + uy * p, 3.4, decal.h * 0.82, [0.94, 0.90, 0.76, 0.78]);
+        }
+        return n - idx;
+      }
+      case 'endpoint_cap':
+        write(decal.x, decal.y, decal.w, decal.h, [0.60, 0.56, 0.46, 0.86]);
+        write(decal.x, decal.y, decal.w * 0.72, 1.0, [0.28, 0.29, 0.26, 0.56]);
+        return n - idx;
+    }
+  }
+
+  private fillRoadLayer(buf: Float32Array, start: number): number {
+    let n = start;
+    const drawSurfaces = (kind: RoadSurface['kind']) => {
+      for (const surface of this.initialRoadSurfaces) {
+        if (surface.kind === kind) n += this.drawRoadSurface(buf, n, surface);
+      }
+      for (const chunk of this.loadedChunks.values()) {
+        for (const surface of chunk.roadSurfaces) {
+          if (surface.kind === kind) n += this.drawRoadSurface(buf, n, surface);
+        }
+      }
+    };
+
+    drawSurfaces('sidewalk');
+    drawSurfaces('road');
+    drawSurfaces('junction');
+
+    for (const decal of this.initialRoadDecals) {
+      n += this.drawRoadDecal(buf, n, decal);
+    }
+    for (const chunk of this.loadedChunks.values()) {
+      for (const decal of chunk.roadDecals) {
+        n += this.drawRoadDecal(buf, n, decal);
+      }
+    }
+    return n - start;
+  }
+
+  private fillSpeedLines(buf: Float32Array, start: number): number {
+    const speedPct = this.race.speedPercent();
+    if (speedPct < 36) return 0;
+
+    let n = start;
+    const intensity = Math.min(1, (speedPct - 36) / 64);
+    const edgeCount = 4 + Math.floor(intensity * 12);
+    const centerCount = Math.floor(intensity * 4);
+    const top = this.camera.y + C.WORLD_MAX_Y;
+    const bottom = this.camera.y + C.WORLD_MIN_Y;
+    const height = top - bottom;
+    const phase = Math.floor(this.camera.y * (0.36 + intensity * 0.28));
+    const hash = (seed: number) => {
+      const v = Math.sin(seed * 78.233 + 13.17) * 43758.5453;
+      return v - Math.floor(v);
+    };
+    const warm = this.race.isOverdrive() || this.race.gear >= 5;
+    const color = warm
+      ? { r: 1.00, g: 0.78, b: 0.36 }
+      : { r: 0.78, g: 0.92, b: 1.00 };
+
+    for (let i = 0; i < edgeCount; i++) {
+      const seed = phase + i * 97;
+      const side = i % 2 === 0 ? -1 : 1;
+      const edgeBand = 116 + hash(seed) * 52;
+      const x = side * edgeBand;
+      const y = bottom + hash(seed + 1) * height;
+      const h = 16 + intensity * 44 + hash(seed + 2) * 20;
+      const w = 0.65 + intensity * 1.15;
+      const alpha = 0.055 + intensity * 0.12;
+      const rot = side * (0.09 + intensity * 0.09 + hash(seed + 3) * 0.05);
+      writeInst(buf, n++, x, y, w, h, color.r, color.g, color.b, alpha, rot);
+      if (intensity > 0.45 && hash(seed + 4) > 0.46) {
+        writeInst(buf, n++, x - side * 7, y - h * 0.10, w * 0.70, h * 0.55, color.r, color.g, color.b, alpha * 0.55, rot);
+      }
+    }
+
+    for (let i = 0; i < centerCount; i++) {
+      const seed = phase + 300 + i * 61;
+      const x = -76 + hash(seed) * 152;
+      const y = bottom + hash(seed + 1) * height;
+      const h = 10 + intensity * 24 + hash(seed + 2) * 12;
+      const alpha = 0.035 + intensity * 0.060;
+      writeInst(buf, n++, x, y, 0.7, h, color.r, color.g, color.b, alpha, (hash(seed + 3) - 0.5) * 0.16);
+    }
+
+    return n - start;
   }
 
   private fillRampageStreetDesign(buf: Float32Array, start: number): number {
@@ -2087,6 +2292,68 @@ export class Game {
     };
 
     switch (type) {
+      case 'city_pavement': {
+        writeInst(buf, n++, x, y, w, h, 0.43, 0.47, 0.40, 1);
+        writeInst(buf, n++, x, y - h * 0.44, w, 1.0, 0.57, 0.60, 0.50, 1);
+        writeInst(buf, n++, x, y + h * 0.44, w, 1.0, 0.29, 0.32, 0.28, 1);
+        for (let i = 1; i < 4; i++) {
+          const yy = y - h / 2 + i * h / 4;
+          writeInst(buf, n++, x, yy, w * 0.92, 0.45, 0.34, 0.37, 0.32, 0.68);
+        }
+        break;
+      }
+
+      case 'city_block': {
+        writeInst(buf, n++, x, y, w, h, 0.72, 0.66, 0.48, 1);
+        writeInst(buf, n++, x, y - h / 2, w, 1.35, 0.96, 0.86, 0.58, 1);
+        writeInst(buf, n++, x, y + h / 2, w, 1.35, 0.28, 0.31, 0.27, 1);
+        writeInst(buf, n++, x - w / 2, y, 1.35, h, 0.28, 0.31, 0.27, 1);
+        writeInst(buf, n++, x + w / 2, y, 1.35, h, 0.96, 0.86, 0.58, 1);
+        writeInst(buf, n++, x, y, w * 0.86, h * 0.72, 0.82, 0.74, 0.53, 1);
+        const cols = Math.max(1, Math.min(3, Math.floor(w / 54)));
+        const rows = Math.max(1, Math.min(2, Math.floor(h / 44)));
+        const cellW = w / cols;
+        const cellH = h / rows;
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const seed = r * 7 + c * 13;
+            const px = x - w / 2 + cellW * (c + 0.5);
+            const py = y - h / 2 + cellH * (r + 0.5);
+            const pw = Math.max(18, cellW * (0.46 + hash(seed + 3) * 0.12));
+            const ph = Math.max(12, cellH * (0.42 + hash(seed + 4) * 0.10));
+            const tone = hash(seed + 5);
+            const rr = tone < 0.33 ? 0.72 : tone < 0.66 ? 0.80 : 0.66;
+            const gg = tone < 0.33 ? 0.70 : tone < 0.66 ? 0.73 : 0.66;
+            const bb = tone < 0.33 ? 0.56 : tone < 0.66 ? 0.48 : 0.60;
+            writeInst(buf, n++, px, py, pw, ph, rr, gg, bb, 1);
+            writeInst(buf, n++, px, py - ph * 0.42, pw * 0.80, 0.9, Math.min(0.88, rr + 0.12), Math.min(0.84, gg + 0.10), Math.min(0.74, bb + 0.06), 1);
+          }
+        }
+        return n - idx;
+      }
+
+      case 'sidewalk': {
+        writeInst(buf, n++, x, y, w, h, 0.86, 0.80, 0.62, 1);
+        if (h > w) {
+          writeInst(buf, n++, x - w * 0.42, y, 0.75, h, 0.32, 0.33, 0.29, 0.58);
+          writeInst(buf, n++, x + w * 0.42, y, 0.75, h, 0.98, 0.90, 0.66, 0.42);
+          const divisions = Math.max(3, Math.floor(h / 46));
+          for (let i = 1; i < divisions; i++) {
+            const yy = y - h / 2 + i * h / divisions;
+            writeInst(buf, n++, x, yy, w * 0.64, 0.45, 0.58, 0.54, 0.42, 0.32);
+          }
+        } else {
+          writeInst(buf, n++, x, y - h * 0.42, w, 0.75, 0.32, 0.33, 0.29, 0.54);
+          writeInst(buf, n++, x, y + h * 0.42, w, 0.75, 0.98, 0.90, 0.66, 0.40);
+          const divisions = Math.max(3, Math.floor(w / 46));
+          for (let i = 1; i < divisions; i++) {
+            const xx = x - w / 2 + i * w / divisions;
+            writeInst(buf, n++, xx, y, 0.45, h * 0.64, 0.58, 0.54, 0.42, 0.30);
+          }
+        }
+        return n - idx;
+      }
+
       // 笏笏笏 遏ｳ逡ｳ: 荳崎ｦ丞援縺ｪ遏ｳ繧偵が繝輔そ繝・ヨ縺励※荳ｦ縺ｹ繧・笏笏笏笏笏笏笏笏笏笏笏
       case 'stone_pavement': {
         // 逶ｮ蝨ｰ縺ｮ證励＞荳句慍
@@ -2116,26 +2383,22 @@ export class Game {
 
       // 笏笏笏 闃・ 螟壽焚縺ｮ闕峨・闡峨ｒ繝ｩ繝ｳ繝繝驟咲ｽｮ 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏
       case 'grass': {
-        // 繝吶・繧ｹ (荳ｭ髢鍋噪縺ｪ邱・
-        writeInst(buf, n++, x, y, w, h, 0.30, 0.52, 0.20, 1);
-        // 譛画ｩ溽噪縺ｪ濶ｲ繝繝ｩ繝代ャ繝・2 縺､ (蜀・
-        writeInst(buf, n++, x - w * 0.22, y - h * 0.18, w * 0.5, h * 0.4,
-          0.24, 0.44, 0.16, 0.65, 0, 1);
-        writeInst(buf, n++, x + w * 0.20, y + h * 0.22, w * 0.5, h * 0.4,
-          0.38, 0.62, 0.24, 0.60, 0, 1);
-        // 闕峨・闡峨ｒ 28 譫壹Λ繝ｳ繝繝謨｣蟶・(邵ｦ縺ｫ邏ｰ髟ｷ縺・聞譁ｹ蠖｢)
-        for (let i = 0; i < 28; i++) {
+        writeInst(buf, n++, x, y, w, h, 0.28, 0.56, 0.24, 1);
+        writeInst(buf, n++, x, y - h / 2, w, 0.9, 0.46, 0.70, 0.34, 1);
+        writeInst(buf, n++, x, y + h / 2, w, 0.9, 0.15, 0.35, 0.15, 1);
+        writeInst(buf, n++, x - w / 2, y, 0.9, h, 0.15, 0.35, 0.15, 1);
+        writeInst(buf, n++, x + w / 2, y, 0.9, h, 0.46, 0.70, 0.34, 1);
+        for (let i = 0; i < 18; i++) {
           const bx = x + (hash(i * 2) - 0.5) * w * 0.92;
           const by = y + (hash(i * 2 + 1) - 0.5) * h * 0.92;
           const bright = 0.55 + hash(i * 3 + 7) * 0.25;
           writeInst(buf, n++, bx, by, 0.6, 1.8,
             0.30 + bright * 0.08, bright + 0.15, 0.18, 0.9);
         }
-        // 蟆上＆縺ｪ逋ｽ闃ｱ 2 縺､ (繧｢繧ｯ繧ｻ繝ｳ繝・
         for (let i = 0; i < 2; i++) {
           const bx = x + (hash(100 + i) - 0.5) * w * 0.85;
           const by = y + (hash(200 + i) - 0.5) * h * 0.85;
-          writeInst(buf, n++, bx, by, 1.3, 1.3, 0.96, 0.93, 0.82, 0.9, 0, 1);
+          writeInst(buf, n++, bx, by, 0.9, 0.9, 0.96, 0.93, 0.82, 0.85, 0, 1);
         }
         break;
       }
@@ -2218,24 +2481,45 @@ export class Game {
 
       // 笏笏笏 繧｢繧ｹ繝輔ぃ繝ｫ繝・ 鬪ｨ譚舌せ繝壹ャ繧ｯ繝ｫ + 繧ｿ繧､繝､霍｡ 笏笏笏笏笏笏笏笏笏笏
       case 'asphalt': {
-        // 繝吶・繧ｹ
-        writeInst(buf, n++, x, y, w, h, 0.28, 0.28, 0.30, 1);
-        // 證励＞繝繝ｩ 2 縺､ (蜀・〒譛画ｩ滓─)
-        writeInst(buf, n++, x - w * 0.15, y - h * 0.1, w * 0.45, h * 0.35,
-          0.22, 0.22, 0.24, 0.55, 0, 1);
-        writeInst(buf, n++, x + w * 0.1, y + h * 0.2, w * 0.4, h * 0.3,
-          0.33, 0.33, 0.35, 0.45, 0, 1);
-        // 鬪ｨ譚・(螟壽焚縺ｮ譏手牡蟆上ラ繝・ヨ)
-        for (let i = 0; i < 26; i++) {
-          const bx = x + (hash(i * 6) - 0.5) * w * 0.95;
-          const by = y + (hash(i * 6 + 1) - 0.5) * h * 0.95;
-          const shade = 0.42 + hash(i * 6 + 2) * 0.18;
-          writeInst(buf, n++, bx, by, 0.8, 0.8,
-            shade, shade, shade + 0.03, 0.80, 0, 1);
+        writeInst(buf, n++, x, y, w, h, 0.20, 0.22, 0.23, 1);
+        if (h > w) {
+          writeInst(buf, n++, x - w * 0.43, y, 0.85, h * 0.96, 0.08, 0.10, 0.11, 0.64);
+          writeInst(buf, n++, x + w * 0.43, y, 0.85, h * 0.96, 0.50, 0.48, 0.40, 0.38);
+          const dashes = Math.max(4, Math.floor(h / 54));
+          for (let i = 0; i < dashes; i++) {
+            const py = y - h * 0.40 + (h * 0.80 / Math.max(1, dashes - 1)) * i;
+            writeInst(buf, n++, x, py, 1.2, 14, 0.92, 0.84, 0.56, 0.44);
+          }
+        } else {
+          writeInst(buf, n++, x, y - h * 0.43, w * 0.96, 0.85, 0.50, 0.48, 0.40, 0.38);
+          writeInst(buf, n++, x, y + h * 0.43, w * 0.96, 0.85, 0.08, 0.10, 0.11, 0.64);
+          const dashes = Math.max(4, Math.floor(w / 54));
+          for (let i = 0; i < dashes; i++) {
+            const px = x - w * 0.40 + (w * 0.80 / Math.max(1, dashes - 1)) * i;
+            writeInst(buf, n++, px, y, 14, 1.2, 0.92, 0.84, 0.56, 0.44);
+          }
         }
-        // 繧ｿ繧､繝､霍｡ 2 譛ｬ (縺・▲縺吶ｉ)
-        writeInst(buf, n++, x - w * 0.18, y - h * 0.05, w * 0.72, 0.5, 0.20, 0.20, 0.22, 0.6);
-        writeInst(buf, n++, x + w * 0.12, y + h * 0.12, w * 0.60, 0.5, 0.20, 0.20, 0.22, 0.6);
+        break;
+      }
+      case 'local_road': {
+        writeInst(buf, n++, x, y, w, h, 0.29, 0.31, 0.30, 1);
+        if (h > w) {
+          writeInst(buf, n++, x - w * 0.44, y, 0.75, h * 0.96, 0.15, 0.17, 0.16, 0.62);
+          writeInst(buf, n++, x + w * 0.44, y, 0.75, h * 0.96, 0.62, 0.59, 0.45, 0.56);
+          const marks = Math.max(4, Math.floor(h / 46));
+          for (let i = 0; i < marks; i++) {
+            const py = y - h * 0.40 + (h * 0.80 / Math.max(1, marks - 1)) * i;
+            writeInst(buf, n++, x, py, 0.8, 7, 0.94, 0.86, 0.60, 0.42);
+          }
+        } else {
+          writeInst(buf, n++, x, y - h * 0.44, w * 0.96, 0.75, 0.62, 0.59, 0.45, 0.56);
+          writeInst(buf, n++, x, y + h * 0.44, w * 0.96, 0.75, 0.15, 0.17, 0.16, 0.62);
+          const marks = Math.max(4, Math.floor(w / 46));
+          for (let i = 0; i < marks; i++) {
+            const px = x - w * 0.40 + (w * 0.80 / Math.max(1, marks - 1)) * i;
+            writeInst(buf, n++, px, y, 7, 0.8, 0.94, 0.86, 0.60, 0.42);
+          }
+        }
         break;
       }
 
@@ -2330,26 +2614,19 @@ export class Game {
 
       // 笏笏笏 繧ｳ繝ｳ繧ｯ繝ｪ繝ｼ繝・ 荳榊ｮ壼ｽ｢縺ｮ繝偵ン + 繧ｷ繝・笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏
       case 'concrete': {
-        // 蠕ｮ螯吶↓繝繝ｩ縺ｮ縺ゅｋ荳句慍
-        writeInst(buf, n++, x, y, w, h, 0.68, 0.66, 0.62, 1);
-        // 譛画ｩ溽噪縺ｪ濶ｲ縺ｮ豺｡縺・Β繝ｩ 2 縺､ (蜀・
-        writeInst(buf, n++, x - w * 0.22, y - h * 0.15, w * 0.5, h * 0.4,
-          0.72, 0.70, 0.66, 0.6, 0, 1);
-        writeInst(buf, n++, x + w * 0.18, y + h * 0.2, w * 0.5, h * 0.4,
-          0.60, 0.58, 0.54, 0.55, 0, 1);
-        // 繧ｨ繧ｭ繧ｹ繝代Φ繧ｷ繝ｧ繝ｳ繧ｸ繝ｧ繧､繝ｳ繝・(豌ｴ蟷ｳ逶ｴ邱・2 譛ｬ)
-        writeInst(buf, n++, x, y - h * 0.33, w, 0.6, 0.38, 0.36, 0.32, 0.75);
-        writeInst(buf, n++, x, y + h * 0.33, w, 0.6, 0.38, 0.36, 0.32, 0.75);
-        // 荳榊ｮ壼ｽ｢縺ｮ繝偵ン (謚倥ｌ邱夐｢ｨ縺ｮ 3 繧ｻ繧ｰ繝｡繝ｳ繝・
-        writeInst(buf, n++, x - w * 0.32, y - h * 0.08, w * 0.28, 0.4,
-          0.30, 0.28, 0.24, 0.85);
-        writeInst(buf, n++, x - w * 0.05, y + h * 0.02, w * 0.26, 0.4,
-          0.30, 0.28, 0.24, 0.85);
-        writeInst(buf, n++, x + w * 0.22, y + h * 0.12, w * 0.22, 0.4,
-          0.30, 0.28, 0.24, 0.85);
-        // 豐ｹ繧ｷ繝・1 縺､ (蜀・ｽ｢)
-        writeInst(buf, n++, x + w * 0.28, y - h * 0.25, w * 0.14, h * 0.1,
-          0.48, 0.44, 0.38, 0.7, 0, 1);
+        writeInst(buf, n++, x, y, w, h, 0.80, 0.78, 0.70, 1);
+        writeInst(buf, n++, x, y - h / 2, w, 1.0, 0.98, 0.93, 0.80, 0.95);
+        writeInst(buf, n++, x, y + h / 2, w, 1.0, 0.37, 0.38, 0.34, 0.88);
+        writeInst(buf, n++, x - w / 2, y, 1.0, h, 0.37, 0.38, 0.34, 0.88);
+        writeInst(buf, n++, x + w / 2, y, 1.0, h, 0.98, 0.93, 0.80, 0.95);
+        writeInst(buf, n++, x, y - h * 0.25, w * 0.92, 0.45, 0.46, 0.45, 0.40, 0.65);
+        writeInst(buf, n++, x, y + h * 0.25, w * 0.92, 0.45, 0.46, 0.45, 0.40, 0.65);
+        writeInst(buf, n++, x - w * 0.25, y, 0.45, h * 0.82, 0.46, 0.45, 0.40, 0.65);
+        writeInst(buf, n++, x + w * 0.25, y, 0.45, h * 0.82, 0.46, 0.45, 0.40, 0.65);
+        writeInst(buf, n++, x - w * 0.30, y - h * 0.08, w * 0.22, 0.35,
+          0.38, 0.36, 0.30, 0.55);
+        writeInst(buf, n++, x + w * 0.20, y + h * 0.12, w * 0.20, 0.35,
+          0.38, 0.36, 0.30, 0.55);
         break;
       }
       case 'steel_plate': {
@@ -2513,6 +2790,213 @@ export class Game {
     return n - idx;
   }
 
+  private drawGroundDecal(buf: Float32Array, idx: number, decal: GroundDecal): number {
+    const alpha = decal.alpha ?? 1;
+    const rot = decal.rot ?? 0;
+    const hash = (i: number) => {
+      const v = Math.sin(decal.x * 18.371 + decal.y * 47.113 + i * 23.719) * 43758.5453;
+      return v - Math.floor(v);
+    };
+    const write = (
+      offset: number,
+      x: number,
+      y: number,
+      w: number,
+      h: number,
+      rgba: readonly [number, number, number, number],
+      r = rot,
+      circle = 0,
+    ) => writeInst(buf, idx + offset, x, y, w, h, rgba[0], rgba[1], rgba[2], rgba[3] * alpha, r, circle);
+
+    switch (decal.kind) {
+      case 'plaza': {
+        let n = 0;
+        write(n++, decal.x, decal.y - decal.h / 2, decal.w, 1.1, [0.96, 0.86, 0.60, 0.54], rot);
+        write(n++, decal.x, decal.y + decal.h / 2, decal.w, 1.1, [0.30, 0.31, 0.28, 0.46], rot);
+        write(n++, decal.x - decal.w / 2, decal.y, 1.1, decal.h, [0.30, 0.31, 0.28, 0.42], rot);
+        write(n++, decal.x + decal.w / 2, decal.y, 1.1, decal.h, [0.96, 0.86, 0.60, 0.48], rot);
+        write(n++, decal.x, decal.y, decal.w * 0.78, 0.8, [0.90, 0.78, 0.54, 0.42], rot);
+        write(n++, decal.x, decal.y + decal.h * 0.22, decal.w * 0.65, 0.7, [0.90, 0.78, 0.54, 0.34], rot);
+        return n;
+      }
+      case 'tile_patch':
+        return 0;
+      case 'feed_mark': {
+        const ux = Math.cos(rot);
+        const uy = Math.sin(rot);
+        write(0, decal.x, decal.y, decal.w, decal.h, [0.54, 0.76, 0.44, 0.32], rot);
+        write(1, decal.x + ux * decal.w * 0.22, decal.y + uy * decal.w * 0.22, 12, 1.8, [0.76, 0.86, 0.54, 0.46], rot + 0.55);
+        write(2, decal.x + ux * decal.w * 0.22, decal.y + uy * decal.w * 0.22, 12, 1.8, [0.76, 0.86, 0.54, 0.46], rot - 0.55);
+        return 3;
+      }
+      case 'score_mark':
+        write(0, decal.x, decal.y - decal.h * 0.35, decal.w, 0.75, [0.86, 0.67, 0.22, 0.28], rot);
+        write(1, decal.x, decal.y + decal.h * 0.35, decal.w * 0.82, 0.75, [0.96, 0.83, 0.36, 0.24], rot);
+        return 2;
+      case 'impact_mark':
+        write(0, decal.x, decal.y, decal.w, decal.h, [0.23, 0.20, 0.17, 0.36], rot);
+        write(1, decal.x + 2, decal.y - 1, decal.w * 0.52, decal.h * 0.55, [0.06, 0.05, 0.05, 0.24], rot, 1);
+        return 2;
+      case 'crowd_spot':
+        write(0, decal.x - decal.w * 0.18, decal.y + decal.h * 0.12, decal.w * 0.34, 0.8, [0.95, 0.70, 0.36, 0.14], rot);
+        write(1, decal.x + decal.w * 0.20, decal.y - decal.h * 0.08, decal.w * 0.30, 0.8, [0.92, 0.58, 0.30, 0.12], rot);
+        write(2, decal.x, decal.y, decal.w * 0.54, 0.65, [0.84, 0.48, 0.26, 0.10], rot);
+        return 3;
+      case 'danger_stripe': {
+        let n = 0;
+        write(n++, decal.x, decal.y, decal.w, decal.h, [0.20, 0.18, 0.13, 0.46], rot);
+        const stripes = Math.max(3, Math.floor(decal.w / 18));
+        for (let i = 0; i < stripes; i++) {
+          const p = -decal.w * 0.42 + i * (decal.w * 0.84 / Math.max(1, stripes - 1));
+          write(n++, decal.x + Math.cos(rot) * p, decal.y + Math.sin(rot) * p, 8, decal.h * 0.62, [0.90, 0.68, 0.16, 0.52], rot + 0.58);
+        }
+        return n;
+      }
+      case 'tire':
+        return 0;
+      case 'stain':
+        return 0;
+      case 'shadow_patch':
+        return 0;
+      case 'lot_frame': {
+        let n = 0;
+        write(n++, decal.x, decal.y - decal.h / 2, decal.w, 1.05, [0.20, 0.23, 0.20, 0.68], rot);
+        write(n++, decal.x, decal.y + decal.h / 2, decal.w, 1.05, [0.98, 0.86, 0.58, 0.46], rot);
+        write(n++, decal.x - decal.w / 2, decal.y, 1.05, decal.h, [0.22, 0.25, 0.22, 0.56], rot);
+        write(n++, decal.x + decal.w / 2, decal.y, 1.05, decal.h, [0.98, 0.86, 0.58, 0.40], rot);
+        write(n++, decal.x + (hash(1) - 0.5) * decal.w * 0.30, decal.y, decal.w * 0.72, 0.45, [0.26, 0.28, 0.25, 0.26], rot);
+        write(n++, decal.x, decal.y + (hash(2) - 0.5) * decal.h * 0.35, 0.45, decal.h * 0.70, [0.26, 0.28, 0.25, 0.24], rot);
+        return n;
+      }
+      case 'shop_stripe': {
+        let n = 0;
+        write(n++, decal.x, decal.y, decal.w, decal.h, [0.12, 0.36, 0.43, 0.54], rot);
+        const stripes = Math.max(3, Math.floor(decal.w / 12));
+        for (let i = 0; i < stripes; i++) {
+          const p = -decal.w * 0.44 + i * (decal.w * 0.88 / Math.max(1, stripes - 1));
+          const warm = i % 2 === 0;
+          write(
+            n++,
+            decal.x + Math.cos(rot) * p,
+            decal.y + Math.sin(rot) * p,
+            decal.w / (stripes + 1),
+            decal.h * 0.92,
+            warm ? [0.92, 0.52, 0.27, 0.48] : [0.92, 0.86, 0.62, 0.38],
+            rot,
+          );
+        }
+        return n;
+      }
+      case 'planter':
+        write(0, decal.x, decal.y + decal.h * 0.24, decal.w * 1.15, decal.h * 0.42, [0.28, 0.22, 0.16, 0.42], rot, 1);
+        write(1, decal.x, decal.y, decal.w, decal.h, [0.22, 0.46, 0.22, 0.58], rot, 1);
+        write(2, decal.x - decal.w * 0.23, decal.y - decal.h * 0.05, decal.w * 0.45, decal.h * 0.45, [0.36, 0.62, 0.30, 0.50], rot, 1);
+        write(3, decal.x + decal.w * 0.22, decal.y + decal.h * 0.04, decal.w * 0.42, decal.h * 0.42, [0.16, 0.36, 0.18, 0.50], rot, 1);
+        return 4;
+      case 'curb_line':
+        write(0, decal.x, decal.y, decal.w, decal.h, [0.76, 0.72, 0.61, 0.42], rot);
+        write(1, decal.x, decal.y - decal.h * 0.38, decal.w, 0.45, [0.34, 0.36, 0.32, 0.24], rot);
+        return 2;
+      case 'lane_mark': {
+        let n = 0;
+        const dashCount = Math.max(3, Math.floor(decal.w / 42));
+        for (let i = 0; i < dashCount; i++) {
+          const p = -decal.w * 0.42 + i * (decal.w * 0.84 / Math.max(1, dashCount - 1));
+          write(n++, decal.x + Math.cos(rot) * p, decal.y + Math.sin(rot) * p, 18, decal.h, [0.88, 0.82, 0.62, 0.32], rot);
+        }
+        return n;
+      }
+      case 'junction_pad':
+        write(0, decal.x, decal.y, decal.w, decal.h, [0.36, 0.36, 0.32, 0.62], rot);
+        write(1, decal.x, decal.y, decal.w * 0.82, 1.0, [0.78, 0.74, 0.58, 0.24], rot);
+        write(2, decal.x, decal.y, 1.0, decal.h * 0.82, [0.78, 0.74, 0.58, 0.22], rot);
+        return 3;
+      case 'road_end_cap':
+        write(0, decal.x, decal.y, decal.w, decal.h, [0.62, 0.58, 0.48, 0.70], rot);
+        write(1, decal.x, decal.y, decal.w * 0.74, 1.0, [0.34, 0.34, 0.30, 0.42], rot);
+        write(2, decal.x, decal.y, 1.0, decal.h * 0.74, [0.34, 0.34, 0.30, 0.32], rot);
+        return 3;
+      case 'crosswalk': {
+        let n = 0;
+        write(n++, decal.x, decal.y, decal.w, decal.h, [0.22, 0.24, 0.23, 0.22], rot);
+        const stripes = Math.max(4, Math.floor(decal.w / 7));
+        for (let i = 0; i < stripes; i++) {
+          const p = -decal.w * 0.44 + i * (decal.w * 0.88 / Math.max(1, stripes - 1));
+          write(n++, decal.x + Math.cos(rot) * p, decal.y + Math.sin(rot) * p, 3.6, decal.h * 0.84, [0.92, 0.88, 0.74, 0.58], rot);
+        }
+        return n;
+      }
+      case 'parking_stall': {
+        let n = 0;
+        const slots = Math.max(2, Math.floor(decal.w / 30));
+        for (let i = 0; i <= slots; i++) {
+          const p = -decal.w * 0.5 + i * (decal.w / slots);
+          write(n++, decal.x + Math.cos(rot) * p, decal.y + Math.sin(rot) * p, 0.8, decal.h * 0.82, [0.88, 0.84, 0.66, 0.42], rot);
+        }
+        write(n++, decal.x, decal.y - decal.h * 0.42, decal.w, 0.65, [0.88, 0.84, 0.66, 0.38], rot);
+        return n;
+      }
+      case 'frontage_pad': {
+        let n = 0;
+        write(n++, decal.x, decal.y, decal.w, decal.h, [0.86, 0.76, 0.52, 0.92], rot);
+        write(n++, decal.x, decal.y - decal.h / 2, decal.w, 1.2, [1.00, 0.88, 0.58, 0.88], rot);
+        write(n++, decal.x, decal.y + decal.h / 2, decal.w, 1.2, [0.28, 0.30, 0.27, 0.84], rot);
+        write(n++, decal.x - decal.w / 2, decal.y, 1.2, decal.h, [0.30, 0.32, 0.28, 0.78], rot);
+        write(n++, decal.x + decal.w / 2, decal.y, 1.2, decal.h, [1.00, 0.88, 0.58, 0.76], rot);
+        const divisions = Math.max(2, Math.min(5, Math.floor(decal.w / 42)));
+        for (let i = 1; i < divisions; i++) {
+          const p = -decal.w * 0.5 + i * (decal.w / divisions);
+          write(n++, decal.x + Math.cos(rot) * p, decal.y + Math.sin(rot) * p, 0.75, decal.h * 0.70, [0.42, 0.43, 0.37, 0.52], rot);
+        }
+        return n;
+      }
+      case 'driveway': {
+        let n = 0;
+        write(n++, decal.x, decal.y, decal.w, decal.h, [0.90, 0.80, 0.58, 0.92], rot);
+        write(n++, decal.x, decal.y - decal.h * 0.42, decal.w * 0.94, 0.8, [0.30, 0.31, 0.28, 0.72], rot);
+        write(n++, decal.x, decal.y + decal.h * 0.42, decal.w * 0.94, 0.8, [1.00, 0.90, 0.62, 0.66], rot);
+        const markers = Math.max(2, Math.min(5, Math.floor(decal.w / 34)));
+        for (let i = 0; i < markers; i++) {
+          const p = -decal.w * 0.40 + i * (decal.w * 0.80 / Math.max(1, markers - 1));
+          write(n++, decal.x + Math.cos(rot) * p, decal.y + Math.sin(rot) * p, 1.2, decal.h * 0.55, [0.45, 0.45, 0.38, 0.54], rot);
+        }
+        return n;
+      }
+      case 'curb_corner': {
+        let n = 0;
+        write(n++, decal.x, decal.y, decal.w, decal.h, [0.78, 0.72, 0.55, 0.58], rot);
+        write(n++, decal.x + Math.cos(rot) * decal.w * 0.20, decal.y + Math.sin(rot) * decal.w * 0.20, decal.w * 0.68, 1.1, [0.36, 0.38, 0.34, 0.70], rot);
+        write(n++, decal.x - Math.sin(rot) * decal.h * 0.20, decal.y + Math.cos(rot) * decal.h * 0.20, 1.1, decal.h * 0.68, [0.36, 0.38, 0.34, 0.70], rot);
+        return n;
+      }
+      case 'facade_row': {
+        let n = 0;
+        const ux = Math.cos(rot);
+        const uy = Math.sin(rot);
+        const vx = -uy;
+        const vy = ux;
+        const modules = Math.max(2, Math.min(4, Math.floor(decal.w / 22)));
+        for (let i = 0; i < modules; i++) {
+          const p = -decal.w * 0.40 + i * (decal.w * 0.80 / Math.max(1, modules - 1));
+          const roll = hash(40 + i);
+          const r = roll < 0.25 ? 0.64 : roll < 0.50 ? 0.56 : roll < 0.75 ? 0.42 : 0.70;
+          const g = roll < 0.25 ? 0.48 : roll < 0.50 ? 0.61 : roll < 0.75 ? 0.53 : 0.62;
+          const b = roll < 0.25 ? 0.36 : roll < 0.50 ? 0.70 : roll < 0.75 ? 0.48 : 0.44;
+          const mx = decal.x + ux * p;
+          const my = decal.y + uy * p;
+          const mw = decal.w / (modules + 0.9) * (0.68 + hash(80 + i) * 0.18);
+          const mh = decal.h * (0.68 + hash(90 + i) * 0.12);
+          write(n++, mx, my + vy * mh * 0.04, mw, mh, [r, g, b, 0.96], rot);
+          write(n++, mx + vx * mh * 0.34, my + vy * mh * 0.34, mw * 0.74, 0.9, [0.84, 0.79, 0.62, 0.95], rot);
+          write(n++, mx - vx * mh * 0.38, my - vy * mh * 0.38, mw * 0.86, 0.8, [0.24, 0.26, 0.25, 0.72], rot);
+          if (i % 2 === 0) write(n++, mx - vx * mh * 0.04, my - vy * mh * 0.04, mw * 0.34, mh * 0.32, [0.18, 0.30, 0.38, 0.88], rot);
+          if (i % 3 === 1) write(n++, mx + vx * mh * 0.20, my + vy * mh * 0.20, mw * 0.42, 0.9, [0.92, 0.72, 0.28, 0.88], rot);
+        }
+        return n;
+      }
+    }
+  }
+
   private fillWalls(buf: Float32Array, start: number): number {
     let n = start;
     const W = 360, WC = 0.18;
@@ -2544,12 +3028,20 @@ export class Game {
     for (const tile of this.initialCityGrounds) {
       n += this.drawGroundTile(buf, n, tile);
     }
+    for (const decal of this.initialGroundDecals) {
+      n += this.drawGroundDecal(buf, n, decal);
+    }
 
-    // 蝮ゅ→繝輔Μ繝・ヱ繝ｼ譟ｱ縺ｯ fillSlopes / fillFlippers 縺ｧ隨ｬ 2 繝代せ縺ｫ謠冗判縺吶ｋ
-    // (驕楢ｷｯ繝ｻ蟒ｺ迚ｩ縺ｫ隕・ｏ繧後↑縺・ｈ縺・怙蜑埼擇縺ｫ蜃ｺ縺・
     const pivY = this.camera.y + C.FLIPPER_PIVOT_Y;
     writeInst(buf, n++, -C.FLIPPER_PIVOT_X, pivY - 20, 6, 40, 0.4, 0.4, 0.55, 1);
     writeInst(buf, n++,  C.FLIPPER_PIVOT_X, pivY - 20, 6, 40, 0.4, 0.4, 0.55, 1);
+
+    const wallCy = this.camera.y;
+    writeInst(buf, n++, C.WORLD_MIN_X + 2, wallCy, 4, C.WORLD_MAX_Y * 2, WC, WC, WC + 0.05, 1);
+    writeInst(buf, n++, C.WORLD_MAX_X - 2, wallCy, 4, C.WORLD_MAX_Y * 2, WC, WC, WC + 0.05, 1);
+    writeInst(buf, n++, 0, wallCy + C.WORLD_MAX_Y - 42, W, 4, WC, WC, WC + 0.05, 1);
+    writeInst(buf, n++, 0, wallCy + C.WORLD_MAX_Y - 82, W, 2, 0.1, 0.1, 0.2, 0.5);
+    return n - start;
 
     const [rr,rg,rb] = C.ROAD_COLOR;
     const [sr,sg,sb] = C.SIDEWALK_COLOR;
@@ -2712,6 +3204,11 @@ export class Game {
       for (const tile of chunk.grounds) {
         n += this.drawGroundTile(buf, n, tile);
       }
+      for (const decal of chunk.groundDecals) {
+        n += this.drawGroundDecal(buf, n, decal);
+      }
+
+      continue;
 
       // 豌ｴ蟷ｳ驕楢ｷｯ
       for (const r of chunk.horizontalRoads) {

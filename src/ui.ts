@@ -11,6 +11,10 @@ export class UIManager {
   private elBest        = document.getElementById('best-display')!;
   private elFuelWrap    = document.getElementById('life-wrap')!;
   private elFuelFill    = document.getElementById('life-fill')!;
+  private elSpeedometer = document.getElementById('speedometer')!;
+  private elSpeedNeedle = document.getElementById('speed-needle')!;
+  private elSpeedValue  = document.getElementById('speed-value')!;
+  private elSpeedGear   = document.getElementById('speed-gear')!;
   private elGameover    = document.getElementById('gameover')!;
   private elFinalScore  = document.getElementById('final-score')!;
   private elFinalBest   = document.getElementById('final-best')!;
@@ -38,10 +42,16 @@ export class UIManager {
     this.elDistance.textContent = `${meters.toLocaleString()} m`;
   }
 
-  setCheckpoint(distanceM: number, nextCheckpointM: number, secondsLeft: number) {
+  setCheckpoint(distanceM: number, nextCheckpointM: number, secondsLeft: number, progressPercent = 0) {
     const time = Math.max(0, secondsLeft);
+    const remainingM = Math.max(0, Math.ceil(nextCheckpointM - distanceM));
+    const pct = Math.max(0, Math.min(100, progressPercent));
     this.elDistance.textContent =
-      `${distanceM.toLocaleString()}m CP${nextCheckpointM.toLocaleString()} ${time.toFixed(1)}s`;
+      `${distanceM.toLocaleString()}m CP ${remainingM.toLocaleString()}m ${time.toFixed(1)}s`;
+    this.elFuelFill.style.width = `${pct}%`;
+    this.elFuelWrap.dataset.cp = `${remainingM.toLocaleString()}m`;
+    this.elFuelWrap.classList.toggle('low', time <= 6 && time > 3);
+    this.elFuelWrap.classList.toggle('crit', time <= 3);
   }
 
   /** ステージ表示: "STAGE N / NAME" (N は 1-origin)。Rampage では CHAIN 表示にも使う。 */
@@ -65,13 +75,20 @@ export class UIManager {
   }
 
   setGear(chargePercent: number, gear: number, downThreshold: number) {
-    const pct = Math.max(0, Math.min(100, chargePercent));
-    this.elFuelFill.style.width = `${pct}%`;
     this.elFuelWrap.dataset.gear = String(gear);
-    const low  = chargePercent <= downThreshold * 1.8 && chargePercent > downThreshold;
-    const crit = chargePercent <= downThreshold;
-    this.elFuelWrap.classList.toggle('low',  low);
-    this.elFuelWrap.classList.toggle('crit', crit);
+    void chargePercent;
+    void downThreshold;
+  }
+
+  setSpeedometer(speed: number, speedPercent: number, gear: number, phase: string) {
+    const pct = Math.max(0, Math.min(100, speedPercent));
+    const deg = -116 + pct * 2.32;
+    const numeric = Math.max(0, Math.round(speed));
+    const phaseKey = phase.toLowerCase();
+    this.elSpeedNeedle.style.transform = `rotate(${deg.toFixed(1)}deg)`;
+    this.elSpeedValue.textContent = String(numeric).padStart(3, '0');
+    this.elSpeedGear.textContent = `G${gear}`;
+    this.elSpeedometer.dataset.phase = phaseKey;
   }
 
   setSpeed(momentum: number) {
