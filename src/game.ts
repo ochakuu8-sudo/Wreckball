@@ -2293,12 +2293,12 @@ export class Game {
 
     switch (type) {
       case 'city_pavement': {
-        writeInst(buf, n++, x, y, w, h, 0.43, 0.47, 0.40, 1);
-        writeInst(buf, n++, x, y - h * 0.44, w, 1.0, 0.57, 0.60, 0.50, 1);
-        writeInst(buf, n++, x, y + h * 0.44, w, 1.0, 0.29, 0.32, 0.28, 1);
+        writeInst(buf, n++, x, y, w, h, 0.39, 0.43, 0.35, 1);
+        writeInst(buf, n++, x, y - h * 0.44, w, 1.0, 0.52, 0.55, 0.43, 1);
+        writeInst(buf, n++, x, y + h * 0.44, w, 1.0, 0.25, 0.30, 0.24, 1);
         for (let i = 1; i < 4; i++) {
           const yy = y - h / 2 + i * h / 4;
-          writeInst(buf, n++, x, yy, w * 0.92, 0.45, 0.34, 0.37, 0.32, 0.68);
+          writeInst(buf, n++, x, yy, w * 0.92, 0.45, 0.28, 0.33, 0.26, 0.56);
         }
         break;
       }
@@ -2557,7 +2557,7 @@ export class Game {
       // 笏笏笏 繧ｿ繧､繝ｫ: 蛟句挨繧ｿ繧､繝ｫ繧偵す繧ｧ繝ｼ繝・ぅ繝ｳ繧ｰ 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏
       case 'tile': {
         // 逶ｮ蝨ｰ縺ｮ證励＞荳句慍
-        writeInst(buf, n++, x, y, w, h, 0.44, 0.42, 0.38, 1);
+        writeInst(buf, n++, x, y, w, h, 0.56, 0.48, 0.40, 1);
         // 4ﾃ・ 縺ｮ繧ｿ繧､繝ｫ縲∝推繧ｿ繧､繝ｫ繧貞句挨繧ｷ繧ｧ繝ｼ繝・
         const cols = 4, rows = 3;
         const tileW = w / cols;
@@ -2567,9 +2567,9 @@ export class Game {
             const tx = x - w / 2 + (c + 0.5) * tileW;
             const ty = y - h / 2 + (r + 0.5) * tileH;
             const hv = hash(r * 17 + c * 5);
-            const shade = 0.72 + hv * 0.16;
+            const shade = 0.70 + hv * 0.14;
             writeInst(buf, n++, tx, ty, tileW * 0.90, tileH * 0.84,
-              shade, shade - 0.02, shade - 0.06, 1);
+              shade + 0.06, shade - 0.02, shade - 0.14, 1);
             // 繧ｿ繧､繝ｫ縺ｮ荳願ｾｺ繝上う繝ｩ繧､繝・
             writeInst(buf, n++, tx, ty - tileH * 0.34, tileW * 0.80, 0.4,
               Math.min(1, shade + 0.15), Math.min(1, shade + 0.12), shade, 0.7);
@@ -2581,7 +2581,7 @@ export class Game {
       // 笏笏笏 菴丞ｮ・｡励う繝ｳ繧ｿ繝ｼ繝ｭ繝・く繝ｳ繧ｰ: 謗ｧ縺医ａ縺ｫ貂ｩ縺九∩縺ｮ縺ゅｋ繧ｰ繝ｬ繝ｼ邉ｻ繝壹う繝舌・ 笏笏笏
       case 'residential_tile': {
         // 逶ｮ蝨ｰ縺ｮ證励＞繧ｰ繝ｬ繝ｼ荳句慍 (蜒・°縺ｫ證冶牡)
-        writeInst(buf, n++, x, y, w, h, 0.45, 0.42, 0.38, 1);
+        writeInst(buf, n++, x, y, w, h, 0.54, 0.48, 0.39, 1);
         // 繧ｿ繧､繝ｫ繧ｵ繧､繧ｺ繧呈ｦゅ・荳螳・(竕・0ﾃ・8) 縺ｫ菫昴▽繧医≧縲√ヱ繝・メ縺ｮ繧ｵ繧､繧ｺ縺九ｉ
         // 陦梧焚繝ｻ蛻玲焚繧堤ｮ怜・ (阮・＞蟶ｯ縺ｧ繧ゅち繧､繝ｫ縺梧ｽｰ繧後↑縺・ｈ縺・↓縺吶ｋ)
         const targetTileW = 90;
@@ -2599,11 +2599,11 @@ export class Game {
             const hv = hash(r * 11 + c * 23 + 3);
             // 繧ｰ繝ｬ繝ｼ繧偵・繝ｼ繧ｹ縺ｫ縲√ヶ繝ｭ繝・け縺斐→縺ｫ蟆代＠縺壹▽證冶牡繝ｻ蟇定牡縺ｸ謖ｯ縺｣縺ｦ
             // 譌･蟶ｸ菴丞ｮ・｡励・繝壹う繝舌・諢・(邨ｱ荳諢・+ 蠕ｮ螯吶↑蛟区ｧ) 繧貞・縺・
-            const shade = 0.70 + hv * 0.10;
+            const shade = 0.68 + hv * 0.10;
             const hueBias = hash(r * 7 + c * 13);
-            const warm  = (hueBias - 0.35) * 0.05;    // 證冶牡縲懊ｏ縺壹°縺ｫ蟇定牡
+            const warm  = 0.04 + (hueBias - 0.35) * 0.05;    // 證冶牡縲懊ｏ縺壹°縺ｫ蟇定牡
             writeInst(buf, n++, bx, by, bw * 0.92, bh * 0.84,
-              shade + warm, shade + warm * 0.3, shade - warm * 0.6, 1);
+              shade + warm + 0.04, shade + warm * 0.25, shade - warm * 0.95, 1);
             // 繝悶Ο繝・け荳願ｾｺ縺ｮ譏弱ｋ縺・ｸ・(遶倶ｽ捺─)
             writeInst(buf, n++, bx, by - bh * 0.34, bw * 0.82, 0.35,
               Math.min(1, shade + 0.15 + warm), Math.min(1, shade + 0.13), Math.min(1, shade + 0.09), 0.75);
