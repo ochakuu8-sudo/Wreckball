@@ -1,4 +1,4 @@
-import { Game } from './game';
+import { Game } from './game-infilled';
 import { initSdk } from './sdk';
 
 const canvas = document.getElementById('gameCanvas') as HTMLCanvasElement;
