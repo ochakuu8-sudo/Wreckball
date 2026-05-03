@@ -21,7 +21,7 @@ export class RampageRules {
 
   reset(): void {
     this.momentum = B.MOMENTUM_INITIAL;
-    this.raceSpeed = 0;
+    this.raceSpeed = B.SCROLL_SPEED_MIN;
     this.runTime = 0;
     this.combo = 0;
     this.maxCombo = 0;
@@ -90,7 +90,7 @@ export class RampageRules {
       target = lerp(B.SCROLL_SPEED_CRUISE, B.SCROLL_SPEED_MAX, t);
     }
 
-    return target * launch;
+    return Math.max(B.SCROLL_SPEED_MIN, target * launch);
   }
 
   private updateRaceSpeed(dt: number): void {
@@ -100,7 +100,7 @@ export class RampageRules {
       : B.SCROLL_SPEED_FALL_PER_SEC;
     const maxStep = rate * dt;
     const delta = Math.max(-maxStep, Math.min(maxStep, target - this.raceSpeed));
-    this.raceSpeed = Math.max(0, Math.min(B.SCROLL_SPEED_MAX, this.raceSpeed + delta));
+    this.raceSpeed = Math.max(B.SCROLL_SPEED_MIN, Math.min(B.SCROLL_SPEED_MAX, this.raceSpeed + delta));
   }
 
   private kickRaceSpeed(amount: number): void {
@@ -162,14 +162,14 @@ export class RampageRules {
 
   onHardBuildingImpact(): void {
     this.addMomentum(-B.HARD_BUILDING_IMPACT_PENALTY);
-    this.raceSpeed = Math.max(0, this.raceSpeed - B.HARD_IMPACT_SPEED_DROP);
+    this.raceSpeed = Math.max(B.SCROLL_SPEED_MIN, this.raceSpeed - B.HARD_IMPACT_SPEED_DROP);
     this.combo = 0;
     this.comboTimer = 0;
   }
 
   onBallLost(): void {
     this.addMomentum(-B.BALL_LOST_PENALTY);
-    this.raceSpeed = Math.max(0, this.raceSpeed - B.BALL_LOST_SPEED_DROP);
+    this.raceSpeed = Math.max(B.SCROLL_SPEED_MIN, this.raceSpeed - B.BALL_LOST_SPEED_DROP);
     this.combo = 0;
     this.comboTimer = 0;
   }

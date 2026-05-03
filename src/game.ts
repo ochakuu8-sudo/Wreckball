@@ -27,7 +27,6 @@ import {
   generateInitialRampageLayout,
   generateRampageLayoutBand,
 } from './rampage-generation';
-import { gameplayStart, gameplayStop } from './sdk';
 
 const MUTE_STORAGE_KEY       = 'kaiju-pinball-muted';
 const BEST_SCORE_STORAGE_KEY = 'kaiju-pinball-best-score';
@@ -35,9 +34,8 @@ const CHECKPOINT_FIRST_M = 35;
 const CHECKPOINT_BASE_INTERVAL_M = 45;
 const CHECKPOINT_INTERVAL_GROWTH_M = 4;
 const CHECKPOINT_INTERVAL_GROWTH_MAX_M = 28;
-const CHECKPOINT_INITIAL_TIME_SEC = 22;
-const CHECKPOINT_BONUS_TIME_SEC = 12;
-const CHECKPOINT_MAX_TIME_SEC = 24;
+const CHECKPOINT_INITIAL_TIME_SEC = 90;
+const CHECKPOINT_MAX_TIME_SEC = CHECKPOINT_INITIAL_TIME_SEC;
 
 function loadBestScore(): number {
   try {
@@ -59,6 +57,19 @@ function saveBestScore(score: number): void {
 const SHARED_BUF = new Float32Array(60000 * INST_F);
 
 type GameState = 'playing' | 'ball_lost' | 'stage_clear' | 'game_over' | 'clear';
+type ScoreSource = 'human' | 'mini' | 'vehicle' | 'building' | 'explosion';
+type ScoreTone = 'quiet' | 'small' | 'normal' | 'big' | 'best';
+
+interface ScoreFeedback {
+  source: ScoreSource;
+  tone?: ScoreTone;
+}
+
+const SOLID_GROUND_DECAL_KINDS = new Set<GroundDecal['kind']>([
+  'plaza',
+  'frontage_pad',
+  'driveway',
+]);
 
 // 蟒ｺ迚ｩ縺ｮ邏譚舌・繝ｭ繝輔ぃ繧､繝ｫ 窶・onBuildingDestroyed 縺ｧ蝓ｺ譛ｬ繝代・繝・ぅ繧ｯ繝ｫ繧貞・繧頑崛縺医ｋ縺溘ａ
 type BuildingMaterial =
@@ -174,6 +185,8 @@ export class Game {
   private totalScore = 0;
   // 繝上う繧ｹ繧ｳ繧｢ (縺薙ｌ縺ｾ縺ｧ縺ｮ繝吶せ繝・totalScore)
   private bestScore = 0;
+  private runStartBestScore = 0;
+  private newBestAnnounced = false;
 
   // 繝昴・繧ｺ迥ｶ諷・(update 繧偵せ繧ｭ繝・・縲、udioContext 繧・suspend)
   private paused = false;
@@ -280,7 +293,6 @@ export class Game {
     this.initRun();
     this.loadCity();
     this.setupTitleScreen();
-    // CrazyGames gameplayStart 縺ｯ繧ｿ繧､繝医Ν逕ｻ髱｢隗｣髯､譎ゅ↓蜻ｼ縺ｶ (螳溘・繝ｬ繧､髢句ｧ九ち繧､繝溘Φ繧ｰ)
     this.startLoop();
   }
 
@@ -290,7 +302,6 @@ export class Game {
     const best  = document.getElementById('title-best');
     if (!title) {
       this.titleActive = false;
-      gameplayStart();
       return;
     }
     // 繝吶せ繝郁ｨ倬鹸陦ｨ遉ｺ (0 縺ｪ繧蛾國縺・
@@ -312,7 +323,6 @@ export class Game {
       title.classList.remove('show');
       this.titleActive = false;
       this.lastTime = performance.now();
-      gameplayStart();
       this.sound.startMusic(this.currentStageIndex);
     };
     title.addEventListener('click', dismiss, { once: true });
@@ -378,12 +388,10 @@ export class Game {
     this.ui.setPauseVisible(paused);
     if (paused) {
       this.sound.suspend();
-      gameplayStop();
     } else {
       this.sound.resume();
       // 蠕ｩ蟶ｰ譎ゅ・ dt 辷・匱繧帝亟縺・
       this.lastTime = performance.now();
-      gameplayStart();
     }
   }
 
@@ -430,7 +438,9 @@ export class Game {
     this.lastSpeedPhase   = this.race.phaseLabel();
     this.resetCheckpoints();
     this.bestScore        = loadBestScore();
-    this.ui.setCheckpoint(0, this.nextCheckpointMeters, this.checkpointTimer, 0);
+    this.runStartBestScore = this.bestScore;
+    this.newBestAnnounced = false;
+    this.ui.setTimeLimit(0, this.checkpointTimer, this.timeLimitProgressPercent());
     this.ui.setRaceStatus(this.race.gear, this.lastSpeedPhase, 0);
     this.ui.setSpeedometer(this.race.scrollSpeed(), this.race.speedPercent(), this.race.gear, this.lastSpeedPhase);
     this.ui.setScore(0);
@@ -546,7 +556,6 @@ export class Game {
     this.initRun();
     this.loadCity();
     this.stuckSeconds = 0;
-    gameplayStart();
     this.sound.startMusic(this.currentStageIndex);
   }
 
@@ -557,10 +566,8 @@ export class Game {
     this.checkpointTimer = CHECKPOINT_INITIAL_TIME_SEC;
   }
 
-  private checkpointProgressPercent(): number {
-    const span = Math.max(1, this.nextCheckpointMeters - this.lastCheckpointMeters);
-    const progress = (this.camera.distanceMeters - this.lastCheckpointMeters) / span;
-    return Math.max(0, Math.min(100, progress * 100));
+  private timeLimitProgressPercent(): number {
+    return Math.max(0, Math.min(100, (this.checkpointTimer / CHECKPOINT_MAX_TIME_SEC) * 100));
   }
 
   private checkpointInterval(): number {
@@ -578,28 +585,12 @@ export class Game {
   }
 
   private consumeReachedCheckpoints(): void {
-    let reached = false;
     while (this.camera.distanceMeters >= this.nextCheckpointMeters) {
-      reached = true;
       const reachedCheckpoint = this.nextCheckpointMeters;
       this.checkpointIndex++;
       this.lastCheckpointMeters = reachedCheckpoint;
       this.nextCheckpointMeters += this.checkpointInterval();
-      this.checkpointTimer = Math.min(
-        CHECKPOINT_MAX_TIME_SEC,
-        this.checkpointTimer + CHECKPOINT_BONUS_TIME_SEC,
-      );
     }
-    if (!reached) return;
-
-    const checkpointReward = this.race.onCheckpointReached();
-    this.ui.showWorldPopup(0, this.camera.y + 128, `CHECKPOINT +${CHECKPOINT_BONUS_TIME_SEC}s`, 'fuel');
-    if (checkpointReward.shiftedUp) {
-      this.ui.showWorldPopup(0, this.camera.y + 100, `GEAR ${this.race.gear}`, 'fuel');
-    }
-    this.juice.flash(0.4, 1, 0.45, 0.08);
-    this.juice.shake(3, 0.12);
-    this.sound.bumper();
   }
 
   private lastTime = 0;
@@ -633,11 +624,10 @@ export class Game {
         this.onGameOver();
         return;
       }
-      this.ui.setCheckpoint(
+      this.ui.setTimeLimit(
         this.camera.distanceMeters,
-        this.nextCheckpointMeters,
         this.checkpointTimer,
-        this.checkpointProgressPercent(),
+        this.timeLimitProgressPercent(),
       );
       this.ui.setSpeedometer(this.race.scrollSpeed(), this.race.speedPercent(), this.race.gear, this.race.phaseLabel());
       if (this.stateTimer <= 0) {
@@ -703,11 +693,10 @@ export class Game {
     }
 
     // 霍晞屬陦ｨ遉ｺ繧呈峩譁ｰ
-    this.ui.setCheckpoint(
+    this.ui.setTimeLimit(
       this.camera.distanceMeters,
-      this.nextCheckpointMeters,
       this.checkpointTimer,
-      this.checkpointProgressPercent(),
+      this.timeLimitProgressPercent(),
     );
 
     // 繝昴ャ繝励い繝・・繝ｬ繧､繝､繝ｼ繧偵き繝｡繝ｩ霑ｽ蠕・(繧ｳ繝ｳ繝・リ1縺､縺縺第峩譁ｰ)
@@ -732,8 +721,8 @@ export class Game {
       const reward = this.race.onHumanEaten(ev.rewardKind, ev.value);
       this.fuel = this.race.gearChargePercent();
       this.totalHumans++;
-      this.addScore(Math.round(120 * ev.value * (1 + Math.min(reward.chain, 50) * 0.08)));
-      this.ui.showSpeedPopup(ev.x, ev.y, reward.chain, reward.overdriveStarted, reward.shiftedUp);
+      const scoreDelta = Math.round(120 * ev.value * (1 + Math.min(reward.chain, 50) * 0.08));
+      this.addScore(scoreDelta, { source: 'human' });
       const chainPunch = Math.min(1.5, 0.45 + reward.chain * 0.035);
       this.juice.shake(C.SHAKE_HUMAN_AMP * chainPunch, 0.075, 0.04);
       if (reward.overdriveStarted) {
@@ -751,14 +740,11 @@ export class Game {
     this.lastSpeedPhase = speedPhase;
 
     if (speedPhase === 'BOOST') {
-      this.ui.showWorldPopup(0, this.camera.y + 116, 'BOOST', 'fuel');
       this.juice.shake(4.2, 0.13, 0.08);
     } else if (speedPhase === 'REDLINE') {
-      this.ui.showWorldPopup(0, this.camera.y + 116, 'REDLINE', 'fuel');
       this.juice.flash(1, 0.35, 0.15, 0.11);
       this.juice.shake(6.0, 0.18, 0.10);
     } else if (speedPhase === 'CRUISE') {
-      this.ui.showWorldPopup(0, this.camera.y + 116, 'GO', 'fuel');
       this.juice.shake(2.0, 0.08, 0.04);
     }
   }
@@ -916,8 +902,7 @@ export class Game {
         this.juice.ballHitFlash();
         this.particles.spawnSpark(b.x, b.y, 12);
         this.particles.spawnRubbleChunks(b.x, b.y, 5, 0.75, 0.78, 0.82);
-        this.ui.showWorldPopup(b.x, b.y + 18, profile.guaranteedOneShot ? 'SMASH' : `DMG x${damage}`, 'boom');
-        this.onBuildingDestroyed(bld, { pierced: true });
+        this.onBuildingDestroyed(bld);
       } else {
         const isBottomHit = b.vy > 0.5 && bldResult.newVy < 0;
         const restitution = isBottomHit ? C.RESTITUTION_BUILDING_BOTTOM : C.RESTITUTION_BUILDING;
@@ -931,7 +916,6 @@ export class Game {
         this.juice.shake(C.SHAKE_HIT_AMP, C.SHAKE_HIT_DUR);
         this.juice.ballHitFlash();
         this.particles.spawnSpark(b.x, b.y, 4);
-        this.ui.showWorldPopup(b.x, b.y + 16, `DMG x${damage}`, 'pierce');
       }
     }
 
@@ -950,7 +934,11 @@ export class Game {
       const destroyed = this.furniture.damage(furnitureHit, 1);
       this.spawnFurnitureFx(furnitureHit.type, b.x, b.y, destroyed);
       this.juice.shake(C.SHAKE_HIT_AMP * 0.5, C.SHAKE_HIT_DUR * 0.5);
-      if (destroyed) this.addScore(furnitureHit.score);
+      if (destroyed) {
+        this.addScore(furnitureHit.score, {
+          source: 'mini',
+        });
+      }
     }
 
     const vehicleHit = this.vehicles.checkBallHit(b.x, b.y, r);
@@ -959,7 +947,9 @@ export class Game {
       if (destroyed) {
         this.spawnVehicleFx(vehicleHit.type, b.x, b.y);
         this.juice.shake(C.SHAKE_HIT_AMP, C.SHAKE_HIT_DUR);
-        this.addScore(vehicleHit.score);
+        this.addScore(vehicleHit.score, {
+          source: 'vehicle',
+        });
         // 蟾･讌ｭ霆贋ｸ｡ (worker_truck) 縺ｯ遐ｴ螢頑凾縺ｫ蜉ｴ蜒崎・ｒ蜷舌￥ 窶・Stage 4 縺ｮ辯・侭陬懃ｵｦ貅・
         const yield_ = VEHICLE_HUMAN_YIELD[vehicleHit.type];
         if (yield_) {
@@ -991,7 +981,7 @@ export class Game {
     return false;
   }
 
-  private onBuildingDestroyed(bld: BuildingData, opts: { pierced?: boolean; chain?: boolean } = {}) {
+  private onBuildingDestroyed(bld: BuildingData) {
     const cx = bld.x + bld.w / 2;
     const cy = bld.y + bld.h / 2;
     this.totalDestroys++;
@@ -1002,12 +992,14 @@ export class Game {
       bld.role === 'stopper' ? 1.35 :
       bld.role === 'bank' ? 1.10 :
       1;
-    this.addScore(Math.round(bld.score * roleScoreMult));
-    if (bld.role === 'vault' && this.race.isOverdrive()) {
-      this.ui.showWorldPopup(cx, cy + bld.h * 0.5 + 34, 'VAULT CASHOUT', 'fuel');
-    }
-    this.sound.buildingDestroy();
+    const scoreDelta = Math.round(bld.score * roleScoreMult);
     const profile = getRampageBuildingProfile(bld.size);
+    const tone = scoreDelta >= 80 || profile.klass === 'large' || profile.klass === 'huge' ? 'big' : 'normal';
+    this.addScore(scoreDelta, {
+      source: 'building',
+      tone,
+    });
+    this.sound.buildingDestroy();
     const rushBoost =
       profile.klass === 'huge' ? 22 :
       profile.klass === 'large' ? 17 :
@@ -1031,10 +1023,6 @@ export class Game {
 
     // 笏笏 遞ｮ蛻･蛻･繝・・繝槭ヱ繝ｼ繝・ぅ繧ｯ繝ｫ 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏
     this.spawnThemedDestructionFx(bld.size, cx, cy, sc);
-
-    if (!opts.pierced && !opts.chain) {
-      this.ui.showWorldPopup(cx, cy + bld.h * 0.5 + 12, `+${bld.score}`, 'score');
-    }
 
     if (bld.size === 'gas_station') {
       this.triggerGasExplosion(bld, cx, cy);
@@ -1086,7 +1074,9 @@ export class Game {
   }
 
   private triggerGasExplosion(source: BuildingData, cx: number, cy: number) {
-    this.addScore(C.GAS_EXPLOSION_SCORE);
+    this.addScore(C.GAS_EXPLOSION_SCORE, {
+      source: 'explosion',
+    });
     this.sound.bumper();
     this.juice.hitstop(C.HITSTOP_LARGE);
     this.juice.shake(C.SHAKE_LARGE_AMP * 1.15, C.SHAKE_LARGE_DUR, 1.6);
@@ -1095,8 +1085,6 @@ export class Game {
     this.particles.spawnSmoke(cx, cy, 22);
     this.particles.spawnSpark(cx, cy, 38);
     this.particles.spawnEmbers(cx, cy, 34);
-    this.ui.showWorldPopup(cx, cy + 34, 'BOOM', 'boom');
-
     for (const b of this.buildings.buildings) {
       if (b === source || !b.active || b.destroyTimer > 0) continue;
       const bx = b.x + b.w / 2;
@@ -1110,7 +1098,7 @@ export class Game {
       b.flashTimer = 0.16;
       this.particles.spawnSpark(bx, by, 8);
       this.particles.spawnDebris(bx, by, 8, b.baseColor[0], b.baseColor[1], b.baseColor[2]);
-      if (destroyed) this.onBuildingDestroyed(b, { chain: true });
+      if (destroyed) this.onBuildingDestroyed(b);
     }
   }
 
@@ -1792,7 +1780,6 @@ export class Game {
     this.lastSpeedPhase = this.race.phaseLabel();
     this.ui.setSpeedometer(this.race.scrollSpeed(), this.race.speedPercent(), this.race.gear, this.lastSpeedPhase);
     this.ui.setRaceStatus(this.race.gear, this.lastSpeedPhase, this.race.humanChain);
-    if (lost.shiftedDown) this.ui.showWorldPopup(0, this.camera.y + 112, `GEAR ${this.race.gear}`, 'fuel');
     this.state = 'ball_lost';
     this.stateTimer = 1.0;
   }
@@ -1802,8 +1789,6 @@ export class Game {
     this.state = 'game_over';
     this.juice.flash(1, 0, 0, 0.6);
     this.sound.stopMusic();
-    // CrazyGames: 繝励Ξ繧､邨ゆｺ・ｒ騾夂衍 (繧､繝ｳ繧ｿ繝ｼ繧ｹ繝・ぅ繧ｷ繝｣繝ｫ蠎・相縺ｮ蛟呵｣懊ち繧､繝溘Φ繧ｰ)
-    gameplayStop();
     this.updateBestScore();
     setTimeout(() => {
       this.ui.showRunOver(
@@ -1821,7 +1806,6 @@ export class Game {
     this.state = 'clear';
     this.juice.flash(1, 0.9, 0.5, 0.7);
     this.sound.stopMusic();
-    gameplayStop();
     this.updateBestScore();
     // 蜍晏茜貍泌・: 繧ｫ繝｡繝ｩ遽・峇蜀・↓闃ｱ轣ｫ繧定､・焚蝗槭せ繝昴・繝ｳ (0縲・.2s 縺ｮ髢薙↓ 5 騾｣逋ｺ)
     this.spawnVictoryFireworks();
@@ -1850,10 +1834,31 @@ export class Game {
     });
   }
 
+  private scoreToneFor(delta: number, feedback: ScoreFeedback): ScoreTone {
+    if (feedback.tone) return feedback.tone;
+    if (feedback.source === 'mini') return 'quiet';
+    if (feedback.source === 'human') return 'quiet';
+    if (feedback.source === 'explosion') return 'big';
+    if (feedback.source === 'building' && delta >= 80) return 'big';
+    return 'normal';
+  }
+
+  private claimNewBest(previousScore: number): boolean {
+    if (this.newBestAnnounced) return false;
+    if (previousScore > this.runStartBestScore || this.totalScore <= this.runStartBestScore) return false;
+    this.newBestAnnounced = true;
+    return true;
+  }
+
   /** 繧ｹ繧ｳ繧｢蜉邂励・繝ｫ繝代・: HUD 繧ょ叉譎ょ渚譏 */
-  private addScore(delta: number): void {
+  private addScore(delta: number, feedback: ScoreFeedback): void {
+    if (delta <= 0) return;
+    const previousScore = this.totalScore;
     this.totalScore += delta;
-    this.ui.setScore(this.totalScore);
+    const newBest = this.claimNewBest(previousScore);
+    const tone = newBest ? 'best' : this.scoreToneFor(delta, feedback);
+    this.ui.setScore(this.totalScore, tone);
+    if (newBest) this.ui.showScoreNotice('NEW BEST');
   }
 
   /** 繝上う繧ｹ繧ｳ繧｢蛻､螳・ 迴ｾ蝨ｨ繧ｹ繧ｳ繧｢縺後・繧ｹ繝医ｒ雜・∴縺ｦ縺・ｌ縺ｰ菫晏ｭ・+ HUD 譖ｴ譁ｰ */
@@ -2293,25 +2298,75 @@ export class Game {
 
     switch (type) {
       case 'city_pavement': {
-        writeInst(buf, n++, x, y, w, h, 0.39, 0.43, 0.35, 1);
-        writeInst(buf, n++, x, y - h * 0.44, w, 1.0, 0.52, 0.55, 0.43, 1);
-        writeInst(buf, n++, x, y + h * 0.44, w, 1.0, 0.25, 0.30, 0.24, 1);
-        for (let i = 1; i < 4; i++) {
-          const yy = y - h / 2 + i * h / 4;
-          writeInst(buf, n++, x, yy, w * 0.92, 0.45, 0.28, 0.33, 0.26, 0.56);
+        writeInst(buf, n++, x, y, w, h, 0.43, 0.45, 0.38, 1);
+
+        const bandCount = Math.max(3, Math.min(5, Math.floor(h / 44)));
+        const bandH = h / bandCount;
+        const pavementPalette: Array<[number, number, number]> = [
+          [0.46, 0.50, 0.41],
+          [0.40, 0.45, 0.46],
+          [0.50, 0.44, 0.37],
+          [0.37, 0.41, 0.34],
+          [0.43, 0.40, 0.45],
+        ];
+        for (let i = 0; i < bandCount; i++) {
+          const paletteIndex = (Math.floor(hash(i + 9) * pavementPalette.length) + i) % pavementPalette.length;
+          const [r, g, b] = pavementPalette[paletteIndex];
+          const yy = y - h / 2 + bandH * (i + 0.5);
+          writeInst(buf, n++, x, yy, w, bandH * 0.92, r, g, b, 1);
+          writeInst(buf, n++, x, yy - bandH * 0.46, w * 0.96, 0.55, 0.35, 0.38, 0.34, 0.38);
+          writeInst(buf, n++, x, yy + bandH * 0.46, w * 0.96, 0.75, 0.24, 0.27, 0.24, 1);
+        }
+
+        const slabCols = Math.max(4, Math.min(6, Math.floor(w / 58)));
+        for (let i = 1; i < slabCols; i++) {
+          const xx = x - w / 2 + i * w / slabCols;
+          writeInst(buf, n++, xx, y, 0.8, h * 0.90, 0.39, 0.38, 0.33, 1);
+          writeInst(buf, n++, xx + 1.2, y, 0.45, h * 0.84, 0.46, 0.45, 0.39, 0.34);
+        }
+
+        const panelRows = Math.max(2, Math.min(4, Math.floor(h / 52)));
+        for (let r = 0; r < panelRows; r++) {
+          const py = y - h / 2 + (r + 0.5) * h / panelRows;
+          const insetW = w * (0.58 + hash(38 + r) * 0.18);
+          const insetH = Math.max(8, h / panelRows * 0.26);
+          const px = x + (hash(42 + r) - 0.5) * w * 0.18;
+          writeInst(buf, n++, px, py, insetW, insetH, 0.49, 0.53, 0.46, 1);
+          writeInst(buf, n++, px, py - insetH * 0.42, insetW * 0.92, 0.55, 0.30, 0.34, 0.31, 1);
+          writeInst(buf, n++, px, py + insetH * 0.42, insetW * 0.92, 0.55, 0.30, 0.34, 0.31, 1);
+        }
+
+        const accentCount = Math.max(3, Math.min(5, Math.floor((w * h) / 13000)));
+        for (let i = 0; i < accentCount; i++) {
+          const bx = x + (hash(60 + i * 5) - 0.5) * w * 0.76;
+          const by = y + (hash(61 + i * 5) - 0.5) * h * 0.68;
+          const bw = 28 + hash(62 + i * 5) * 30;
+          const bh = 13 + hash(63 + i * 5) * 12;
+          const accent = i % 3 === 0 ? [0.52, 0.62, 0.48] : i % 3 === 1 ? [0.60, 0.48, 0.36] : [0.43, 0.52, 0.60];
+          writeInst(buf, n++, bx, by, bw, bh, accent[0], accent[1], accent[2], 1);
+          writeInst(buf, n++, bx, by - bh * 0.45, bw * 0.90, 0.55, 0.50, 0.47, 0.40, 0.32);
+          writeInst(buf, n++, bx, by + bh * 0.45, bw * 0.90, 0.7, 0.30, 0.31, 0.29, 1);
         }
         break;
       }
 
       case 'city_block': {
-        writeInst(buf, n++, x, y, w, h, 0.72, 0.66, 0.48, 1);
-        writeInst(buf, n++, x, y - h / 2, w, 1.35, 0.96, 0.86, 0.58, 1);
-        writeInst(buf, n++, x, y + h / 2, w, 1.35, 0.28, 0.31, 0.27, 1);
-        writeInst(buf, n++, x - w / 2, y, 1.35, h, 0.28, 0.31, 0.27, 1);
-        writeInst(buf, n++, x + w / 2, y, 1.35, h, 0.96, 0.86, 0.58, 1);
-        writeInst(buf, n++, x, y, w * 0.86, h * 0.72, 0.82, 0.74, 0.53, 1);
-        const cols = Math.max(1, Math.min(3, Math.floor(w / 54)));
-        const rows = Math.max(1, Math.min(2, Math.floor(h / 44)));
+        writeInst(buf, n++, x, y, w, h, 0.42, 0.46, 0.45, 1);
+        writeInst(buf, n++, x, y - h / 2, w, 1.0, 0.32, 0.36, 0.36, 0.66);
+        writeInst(buf, n++, x, y + h / 2, w, 1.35, 0.20, 0.24, 0.24, 1);
+        writeInst(buf, n++, x - w / 2, y, 1.35, h, 0.20, 0.24, 0.24, 1);
+        writeInst(buf, n++, x + w / 2, y, 1.0, h, 0.48, 0.50, 0.46, 0.56);
+        writeInst(buf, n++, x, y, w * 0.90, h * 0.78, 0.56, 0.58, 0.52, 1);
+
+        const bandRows = Math.max(2, Math.min(3, Math.floor(h / 46)));
+        for (let r = 1; r < bandRows; r++) {
+          const yy = y - h / 2 + (h * r) / bandRows;
+          writeInst(buf, n++, x, yy, w * 0.86, 0.75, 0.30, 0.34, 0.34, 0.86);
+          writeInst(buf, n++, x, yy - 1.0, w * 0.80, 0.45, 0.48, 0.49, 0.44, 0.30);
+        }
+
+        const cols = Math.max(1, Math.min(3, Math.floor(w / 70)));
+        const rows = Math.max(1, Math.min(2, Math.floor(h / 54)));
         const cellW = w / cols;
         const cellH = h / rows;
         for (let r = 0; r < rows; r++) {
@@ -2319,15 +2374,33 @@ export class Game {
             const seed = r * 7 + c * 13;
             const px = x - w / 2 + cellW * (c + 0.5);
             const py = y - h / 2 + cellH * (r + 0.5);
-            const pw = Math.max(18, cellW * (0.46 + hash(seed + 3) * 0.12));
-            const ph = Math.max(12, cellH * (0.42 + hash(seed + 4) * 0.10));
+            const pw = Math.max(20, cellW * (0.78 + hash(seed + 3) * 0.08));
+            const ph = Math.max(16, cellH * (0.70 + hash(seed + 4) * 0.08));
             const tone = hash(seed + 5);
-            const rr = tone < 0.33 ? 0.72 : tone < 0.66 ? 0.80 : 0.66;
-            const gg = tone < 0.33 ? 0.70 : tone < 0.66 ? 0.73 : 0.66;
-            const bb = tone < 0.33 ? 0.56 : tone < 0.66 ? 0.48 : 0.60;
+            const rr = tone < 0.33 ? 0.51 : tone < 0.66 ? 0.62 : 0.44;
+            const gg = tone < 0.33 ? 0.58 : tone < 0.66 ? 0.55 : 0.50;
+            const bb = tone < 0.33 ? 0.56 : tone < 0.66 ? 0.48 : 0.54;
             writeInst(buf, n++, px, py, pw, ph, rr, gg, bb, 1);
-            writeInst(buf, n++, px, py - ph * 0.42, pw * 0.80, 0.9, Math.min(0.88, rr + 0.12), Math.min(0.84, gg + 0.10), Math.min(0.74, bb + 0.06), 1);
+            writeInst(buf, n++, px, py - ph * 0.42, pw * 0.80, 0.45, 0.50, 0.48, 0.42, 0.26);
           }
+        }
+        for (let c = 1; c < cols; c++) {
+          const xx = x - w / 2 + cellW * c;
+          writeInst(buf, n++, xx, y, 0.85, h * 0.76, 0.36, 0.36, 0.31, 0.82);
+          writeInst(buf, n++, xx + 1.1, y, 0.45, h * 0.70, 0.45, 0.44, 0.38, 0.24);
+        }
+        for (let r = 1; r < rows; r++) {
+          const yy = y - h / 2 + cellH * r;
+          writeInst(buf, n++, x, yy, w * 0.78, 0.65, 0.36, 0.36, 0.31, 0.78);
+        }
+
+        const serviceCount = Math.max(2, Math.min(4, Math.floor(w / 56)));
+        for (let i = 0; i < serviceCount; i++) {
+          const sx = x - w * 0.38 + (w * 0.76 / Math.max(1, serviceCount - 1)) * i;
+          const sy = y + h * (hash(90 + i) < 0.5 ? -0.23 : 0.23);
+          writeInst(buf, n++, sx, sy, Math.max(12, w * 0.10), 5.0, 0.33, 0.39, 0.39, 1);
+          writeInst(buf, n++, sx, sy - 2.6, Math.max(10, w * 0.08), 0.5, 0.22, 0.26, 0.26, 1);
+          writeInst(buf, n++, sx, sy + 2.6, Math.max(10, w * 0.08), 0.5, 0.58, 0.61, 0.56, 0.62);
         }
         return n - idx;
       }
@@ -2336,7 +2409,7 @@ export class Game {
         writeInst(buf, n++, x, y, w, h, 0.86, 0.80, 0.62, 1);
         if (h > w) {
           writeInst(buf, n++, x - w * 0.42, y, 0.75, h, 0.32, 0.33, 0.29, 0.58);
-          writeInst(buf, n++, x + w * 0.42, y, 0.75, h, 0.98, 0.90, 0.66, 0.42);
+          writeInst(buf, n++, x + w * 0.42, y, 0.75, h, 0.62, 0.59, 0.49, 0.34);
           const divisions = Math.max(3, Math.floor(h / 46));
           for (let i = 1; i < divisions; i++) {
             const yy = y - h / 2 + i * h / divisions;
@@ -2344,7 +2417,7 @@ export class Game {
           }
         } else {
           writeInst(buf, n++, x, y - h * 0.42, w, 0.75, 0.32, 0.33, 0.29, 0.54);
-          writeInst(buf, n++, x, y + h * 0.42, w, 0.75, 0.98, 0.90, 0.66, 0.40);
+          writeInst(buf, n++, x, y + h * 0.42, w, 0.75, 0.62, 0.59, 0.49, 0.32);
           const divisions = Math.max(3, Math.floor(w / 46));
           for (let i = 1; i < divisions; i++) {
             const xx = x - w / 2 + i * w / divisions;
@@ -2357,10 +2430,10 @@ export class Game {
       // 笏笏笏 遏ｳ逡ｳ: 荳崎ｦ丞援縺ｪ遏ｳ繧偵が繝輔そ繝・ヨ縺励※荳ｦ縺ｹ繧・笏笏笏笏笏笏笏笏笏笏笏
       case 'stone_pavement': {
         // 逶ｮ蝨ｰ縺ｮ證励＞荳句慍
-        writeInst(buf, n++, x, y, w, h, 0.32, 0.28, 0.22, 1);
+        writeInst(buf, n++, x, y, w, h, 0.26, 0.30, 0.31, 1);
         // 4 陦・ﾃ・3 蛻励∬｡後＃縺ｨ縺ｫ蜊翫そ繝ｫ蛻・が繝輔そ繝・ヨ (辣臥逃遨阪∩)
-        const rows = 4;
-        const cols = 3;
+        const rows = Math.max(4, Math.min(6, Math.floor(h / 14)));
+        const cols = Math.max(3, Math.min(5, Math.floor(w / 18)));
         const sh = h / rows;
         const sw = w / cols;
         for (let r = 0; r < rows; r++) {
@@ -2370,35 +2443,49 @@ export class Game {
             const sy = y - h / 2 + (r + 0.5) * sh;
             if (sx < x - w / 2 - sw * 0.15 || sx > x + w / 2 + sw * 0.15) continue;
             const hv = hash(r * 13 + c * 7);
-            const shade = 0.50 + hv * 0.15;
+            const shade = 0.46 + hv * 0.15;
             writeInst(buf, n++, sx, sy, sw * 0.88, sh * 0.82,
-              shade * 1.05, shade * 0.95, shade * 0.80, 1);
+              shade * 0.88, shade * 0.96, shade * 1.02, 1);
             // 遏ｳ縺ｮ荳願ｾｺ繝上う繝ｩ繧､繝・
-            writeInst(buf, n++, sx, sy - sh * 0.32, sw * 0.80, 0.4,
-              Math.min(1, shade + 0.15), Math.min(1, shade + 0.10), shade * 0.90, 0.7);
+          writeInst(buf, n++, sx, sy - sh * 0.32, sw * 0.80, 0.35,
+              0.34, 0.38, 0.40, 0.30);
           }
         }
+        writeInst(buf, n++, x, y - h * 0.47, w * 0.86, 0.85, 0.50, 0.55, 0.56, 1);
+        writeInst(buf, n++, x, y + h * 0.47, w * 0.86, 0.85, 0.16, 0.20, 0.22, 1);
+        writeInst(buf, n++, x - w * 0.47, y, 0.85, h * 0.84, 0.16, 0.20, 0.22, 1);
+        writeInst(buf, n++, x + w * 0.47, y, 0.85, h * 0.84, 0.50, 0.55, 0.56, 0.88);
         break;
       }
 
       // 笏笏笏 闃・ 螟壽焚縺ｮ闕峨・闡峨ｒ繝ｩ繝ｳ繝繝驟咲ｽｮ 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏
       case 'grass': {
-        writeInst(buf, n++, x, y, w, h, 0.28, 0.56, 0.24, 1);
-        writeInst(buf, n++, x, y - h / 2, w, 0.9, 0.46, 0.70, 0.34, 1);
-        writeInst(buf, n++, x, y + h / 2, w, 0.9, 0.15, 0.35, 0.15, 1);
-        writeInst(buf, n++, x - w / 2, y, 0.9, h, 0.15, 0.35, 0.15, 1);
-        writeInst(buf, n++, x + w / 2, y, 0.9, h, 0.46, 0.70, 0.34, 1);
-        for (let i = 0; i < 18; i++) {
-          const bx = x + (hash(i * 2) - 0.5) * w * 0.92;
-          const by = y + (hash(i * 2 + 1) - 0.5) * h * 0.92;
-          const bright = 0.55 + hash(i * 3 + 7) * 0.25;
-          writeInst(buf, n++, bx, by, 0.6, 1.8,
-            0.30 + bright * 0.08, bright + 0.15, 0.18, 0.9);
+        writeInst(buf, n++, x, y, w, h, 0.33, 0.53, 0.34, 1);
+        writeInst(buf, n++, x, y - h / 2, w, 1.0, 0.55, 0.72, 0.42, 1);
+        writeInst(buf, n++, x, y + h / 2, w, 1.0, 0.18, 0.32, 0.20, 1);
+        writeInst(buf, n++, x - w / 2, y, 1.0, h, 0.18, 0.32, 0.20, 1);
+        writeInst(buf, n++, x + w / 2, y, 1.0, h, 0.55, 0.72, 0.42, 1);
+        writeInst(buf, n++, x, y, w * 0.84, h * 0.70, 0.40, 0.59, 0.37, 1);
+
+        const pathW = Math.max(8, Math.min(18, w * 0.16));
+        if (w > h) {
+          writeInst(buf, n++, x, y, w * 0.74, pathW, 0.70, 0.66, 0.50, 1);
+          writeInst(buf, n++, x, y - pathW * 0.42, w * 0.68, 0.75, 0.88, 0.80, 0.58, 0.72);
+          writeInst(buf, n++, x, y + pathW * 0.42, w * 0.68, 0.75, 0.26, 0.31, 0.25, 0.72);
+        } else {
+          writeInst(buf, n++, x, y, pathW, h * 0.74, 0.70, 0.66, 0.50, 1);
+          writeInst(buf, n++, x - pathW * 0.42, y, 0.75, h * 0.68, 0.26, 0.31, 0.25, 0.72);
+          writeInst(buf, n++, x + pathW * 0.42, y, 0.75, h * 0.68, 0.88, 0.80, 0.58, 0.72);
         }
-        for (let i = 0; i < 2; i++) {
-          const bx = x + (hash(100 + i) - 0.5) * w * 0.85;
-          const by = y + (hash(200 + i) - 0.5) * h * 0.85;
-          writeInst(buf, n++, bx, by, 0.9, 0.9, 0.96, 0.93, 0.82, 0.85, 0, 1);
+
+        const bedCount = Math.max(2, Math.min(4, Math.floor((w + h) / 58)));
+        for (let i = 0; i < bedCount; i++) {
+          const bx = x + (hash(i * 5 + 1) - 0.5) * w * 0.68;
+          const by = y + (hash(i * 5 + 2) - 0.5) * h * 0.58;
+          const bw = Math.max(10, Math.min(26, w * (0.16 + hash(i * 5 + 3) * 0.08)));
+          const bh = Math.max(8, Math.min(20, h * (0.14 + hash(i * 5 + 4) * 0.08)));
+          writeInst(buf, n++, bx, by, bw, bh, 0.28, 0.45, 0.25, 1);
+          writeInst(buf, n++, bx, by - bh * 0.43, bw * 0.82, 0.65, 0.57, 0.73, 0.40, 0.80);
         }
         break;
       }
@@ -2431,11 +2518,11 @@ export class Game {
       // 笏笏笏 邇臥ょ茜: 螟ｧ驥上・荳ｸ縺・浹縺ｧ謨ｷ縺崎ｩｰ繧√ｋ 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏
       case 'gravel': {
         // 繝吶・繧ｹ
-        writeInst(buf, n++, x, y, w, h, 0.60, 0.56, 0.48, 1);
+        writeInst(buf, n++, x, y, w, h, 0.50, 0.49, 0.44, 1);
         // 譫ｯ螻ｱ豌ｴ縺ｮ遐らｴ・(阮・＞豌ｴ蟷ｳ邱・3 譛ｬ)
-        writeInst(buf, n++, x, y - h * 0.28, w * 0.92, 0.5, 0.78, 0.72, 0.62, 0.45);
-        writeInst(buf, n++, x, y,              w * 0.92, 0.5, 0.78, 0.72, 0.62, 0.45);
-        writeInst(buf, n++, x, y + h * 0.28,   w * 0.92, 0.5, 0.78, 0.72, 0.62, 0.45);
+        writeInst(buf, n++, x, y - h * 0.28, w * 0.92, 0.5, 0.65, 0.62, 0.55, 0.45);
+        writeInst(buf, n++, x, y,              w * 0.92, 0.5, 0.65, 0.62, 0.55, 0.45);
+        writeInst(buf, n++, x, y + h * 0.28,   w * 0.92, 0.5, 0.65, 0.62, 0.55, 0.45);
         // 遐ょ茜縺ｮ遏ｳ繧呈聞縺崎ｩｰ繧√ｋ (32 蛟九∝､ｧ蟆上＆縺ｾ縺悶∪)
         for (let i = 0; i < 32; i++) {
           const bx = x + (hash(i * 4) - 0.5) * w * 0.95;
@@ -2444,6 +2531,12 @@ export class Game {
           const shade = 0.45 + hash(i * 4 + 3) * 0.22;
           writeInst(buf, n++, bx, by, sz, sz,
             shade, shade - 0.02, shade - 0.08, 0.92, 0, 1);
+        }
+        const compactBands = Math.max(2, Math.min(3, Math.floor(w / 48)));
+        for (let i = 0; i < compactBands; i++) {
+          const bx = x - w * 0.28 + i * (w * 0.56 / Math.max(1, compactBands - 1));
+          writeInst(buf, n++, bx, y + h * 0.22, Math.max(16, w * 0.16), 5.5, 0.36, 0.37, 0.34, 1);
+          writeInst(buf, n++, bx, y + h * 0.22, Math.max(12, w * 0.12), 1.1, 0.66, 0.63, 0.56, 0.62);
         }
         break;
       }
@@ -2488,7 +2581,7 @@ export class Game {
           const dashes = Math.max(4, Math.floor(h / 54));
           for (let i = 0; i < dashes; i++) {
             const py = y - h * 0.40 + (h * 0.80 / Math.max(1, dashes - 1)) * i;
-            writeInst(buf, n++, x, py, 1.2, 14, 0.92, 0.84, 0.56, 0.44);
+          writeInst(buf, n++, x, py, 1.2, 14, 0.78, 0.76, 0.70, 0.30);
           }
         } else {
           writeInst(buf, n++, x, y - h * 0.43, w * 0.96, 0.85, 0.50, 0.48, 0.40, 0.38);
@@ -2496,7 +2589,7 @@ export class Game {
           const dashes = Math.max(4, Math.floor(w / 54));
           for (let i = 0; i < dashes; i++) {
             const px = x - w * 0.40 + (w * 0.80 / Math.max(1, dashes - 1)) * i;
-            writeInst(buf, n++, px, y, 14, 1.2, 0.92, 0.84, 0.56, 0.44);
+            writeInst(buf, n++, px, y, 14, 1.2, 0.78, 0.76, 0.70, 0.30);
           }
         }
         break;
@@ -2505,19 +2598,19 @@ export class Game {
         writeInst(buf, n++, x, y, w, h, 0.29, 0.31, 0.30, 1);
         if (h > w) {
           writeInst(buf, n++, x - w * 0.44, y, 0.75, h * 0.96, 0.15, 0.17, 0.16, 0.62);
-          writeInst(buf, n++, x + w * 0.44, y, 0.75, h * 0.96, 0.62, 0.59, 0.45, 0.56);
+          writeInst(buf, n++, x + w * 0.44, y, 0.75, h * 0.96, 0.50, 0.49, 0.43, 0.42);
           const marks = Math.max(4, Math.floor(h / 46));
           for (let i = 0; i < marks; i++) {
             const py = y - h * 0.40 + (h * 0.80 / Math.max(1, marks - 1)) * i;
-            writeInst(buf, n++, x, py, 0.8, 7, 0.94, 0.86, 0.60, 0.42);
+            writeInst(buf, n++, x, py, 0.8, 7, 0.76, 0.75, 0.69, 0.28);
           }
         } else {
-          writeInst(buf, n++, x, y - h * 0.44, w * 0.96, 0.75, 0.62, 0.59, 0.45, 0.56);
+          writeInst(buf, n++, x, y - h * 0.44, w * 0.96, 0.75, 0.50, 0.49, 0.43, 0.42);
           writeInst(buf, n++, x, y + h * 0.44, w * 0.96, 0.75, 0.15, 0.17, 0.16, 0.62);
           const marks = Math.max(4, Math.floor(w / 46));
           for (let i = 0; i < marks; i++) {
             const px = x - w * 0.40 + (w * 0.80 / Math.max(1, marks - 1)) * i;
-            writeInst(buf, n++, px, y, 7, 0.8, 0.94, 0.86, 0.60, 0.42);
+            writeInst(buf, n++, px, y, 7, 0.8, 0.76, 0.75, 0.69, 0.28);
           }
         }
         break;
@@ -2557,7 +2650,11 @@ export class Game {
       // 笏笏笏 繧ｿ繧､繝ｫ: 蛟句挨繧ｿ繧､繝ｫ繧偵す繧ｧ繝ｼ繝・ぅ繝ｳ繧ｰ 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏
       case 'tile': {
         // 逶ｮ蝨ｰ縺ｮ證励＞荳句慍
-        writeInst(buf, n++, x, y, w, h, 0.56, 0.48, 0.40, 1);
+        writeInst(buf, n++, x, y, w, h, 0.70, 0.50, 0.35, 1);
+        writeInst(buf, n++, x, y - h * 0.46, w * 0.92, 1.0, 0.94, 0.66, 0.38, 1);
+        writeInst(buf, n++, x, y + h * 0.46, w * 0.92, 1.0, 0.40, 0.25, 0.18, 1);
+        writeInst(buf, n++, x - w * 0.46, y, 1.0, h * 0.86, 0.40, 0.25, 0.18, 1);
+        writeInst(buf, n++, x + w * 0.46, y, 1.0, h * 0.86, 0.94, 0.66, 0.38, 0.86);
         // 4ﾃ・ 縺ｮ繧ｿ繧､繝ｫ縲∝推繧ｿ繧､繝ｫ繧貞句挨繧ｷ繧ｧ繝ｼ繝・
         const cols = 4, rows = 3;
         const tileW = w / cols;
@@ -2567,13 +2664,20 @@ export class Game {
             const tx = x - w / 2 + (c + 0.5) * tileW;
             const ty = y - h / 2 + (r + 0.5) * tileH;
             const hv = hash(r * 17 + c * 5);
-            const shade = 0.70 + hv * 0.14;
+            const shade = 0.66 + hv * 0.16;
             writeInst(buf, n++, tx, ty, tileW * 0.90, tileH * 0.84,
-              shade + 0.06, shade - 0.02, shade - 0.14, 1);
+              shade + 0.12, shade * 0.78, shade * 0.56, 1);
             // 繧ｿ繧､繝ｫ縺ｮ荳願ｾｺ繝上う繝ｩ繧､繝・
-            writeInst(buf, n++, tx, ty - tileH * 0.34, tileW * 0.80, 0.4,
-              Math.min(1, shade + 0.15), Math.min(1, shade + 0.12), shade, 0.7);
+            writeInst(buf, n++, tx, ty - tileH * 0.34, tileW * 0.80, 0.35,
+              0.46, 0.34, 0.27, 0.28);
           }
+        }
+        const frontageStrips = Math.max(2, Math.min(4, Math.floor(w / 44)));
+        for (let i = 0; i < frontageStrips; i++) {
+          const sx = x - w * 0.34 + i * (w * 0.68 / Math.max(1, frontageStrips - 1));
+          const sy = y + h * (i % 2 === 0 ? -0.18 : 0.18);
+          writeInst(buf, n++, sx, sy, Math.max(12, w * 0.12), 4.5, 0.82, 0.38, 0.24, 1);
+          writeInst(buf, n++, sx, sy, Math.max(9, w * 0.09), 1.0, 0.98, 0.73, 0.44, 0.72);
         }
         break;
       }
@@ -2581,7 +2685,9 @@ export class Game {
       // 笏笏笏 菴丞ｮ・｡励う繝ｳ繧ｿ繝ｼ繝ｭ繝・く繝ｳ繧ｰ: 謗ｧ縺医ａ縺ｫ貂ｩ縺九∩縺ｮ縺ゅｋ繧ｰ繝ｬ繝ｼ邉ｻ繝壹う繝舌・ 笏笏笏
       case 'residential_tile': {
         // 逶ｮ蝨ｰ縺ｮ證励＞繧ｰ繝ｬ繝ｼ荳句慍 (蜒・°縺ｫ證冶牡)
-        writeInst(buf, n++, x, y, w, h, 0.54, 0.48, 0.39, 1);
+        writeInst(buf, n++, x, y, w, h, 0.44, 0.52, 0.40, 1);
+        writeInst(buf, n++, x, y - h * 0.44, w * 0.90, 2.0, 0.36, 0.48, 0.32, 1);
+        writeInst(buf, n++, x, y + h * 0.44, w * 0.90, 2.0, 0.25, 0.36, 0.26, 1);
         // 繧ｿ繧､繝ｫ繧ｵ繧､繧ｺ繧呈ｦゅ・荳螳・(竕・0ﾃ・8) 縺ｫ菫昴▽繧医≧縲√ヱ繝・メ縺ｮ繧ｵ繧､繧ｺ縺九ｉ
         // 陦梧焚繝ｻ蛻玲焚繧堤ｮ怜・ (阮・＞蟶ｯ縺ｧ繧ゅち繧､繝ｫ縺梧ｽｰ繧後↑縺・ｈ縺・↓縺吶ｋ)
         const targetTileW = 90;
@@ -2599,34 +2705,65 @@ export class Game {
             const hv = hash(r * 11 + c * 23 + 3);
             // 繧ｰ繝ｬ繝ｼ繧偵・繝ｼ繧ｹ縺ｫ縲√ヶ繝ｭ繝・け縺斐→縺ｫ蟆代＠縺壹▽證冶牡繝ｻ蟇定牡縺ｸ謖ｯ縺｣縺ｦ
             // 譌･蟶ｸ菴丞ｮ・｡励・繝壹う繝舌・諢・(邨ｱ荳諢・+ 蠕ｮ螯吶↑蛟区ｧ) 繧貞・縺・
-            const shade = 0.68 + hv * 0.10;
+            const shade = 0.58 + hv * 0.11;
             const hueBias = hash(r * 7 + c * 13);
-            const warm  = 0.04 + (hueBias - 0.35) * 0.05;    // 證冶牡縲懊ｏ縺壹°縺ｫ蟇定牡
+            const greenBias = 0.05 + hueBias * 0.05;
             writeInst(buf, n++, bx, by, bw * 0.92, bh * 0.84,
-              shade + warm + 0.04, shade + warm * 0.25, shade - warm * 0.95, 1);
+              shade * 0.86, shade + greenBias, shade * 0.72, 1);
             // 繝悶Ο繝・け荳願ｾｺ縺ｮ譏弱ｋ縺・ｸ・(遶倶ｽ捺─)
-            writeInst(buf, n++, bx, by - bh * 0.34, bw * 0.82, 0.35,
-              Math.min(1, shade + 0.15 + warm), Math.min(1, shade + 0.13), Math.min(1, shade + 0.09), 0.75);
+            writeInst(buf, n++, bx, by - bh * 0.34, bw * 0.82, 0.30,
+              0.32, 0.41, 0.32, 0.26);
           }
+        }
+        const entryPads = Math.max(2, Math.min(3, Math.floor(w / 58)));
+        for (let i = 0; i < entryPads; i++) {
+          const ex = x - w * 0.26 + i * (w * 0.52 / Math.max(1, entryPads - 1));
+          const ey = y + h * (hash(180 + i) < 0.5 ? -0.22 : 0.22);
+          writeInst(buf, n++, ex, ey, Math.max(12, w * 0.11), 7.0, 0.62, 0.58, 0.45, 1);
+          writeInst(buf, n++, ex, ey - 3.3, Math.max(9, w * 0.08), 0.6, 0.30, 0.40, 0.30, 1);
+          writeInst(buf, n++, ex, ey + 3.3, Math.max(9, w * 0.08), 0.6, 0.80, 0.76, 0.56, 0.72);
         }
         break;
       }
 
       // 笏笏笏 繧ｳ繝ｳ繧ｯ繝ｪ繝ｼ繝・ 荳榊ｮ壼ｽ｢縺ｮ繝偵ン + 繧ｷ繝・笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏
       case 'concrete': {
-        writeInst(buf, n++, x, y, w, h, 0.80, 0.78, 0.70, 1);
-        writeInst(buf, n++, x, y - h / 2, w, 1.0, 0.98, 0.93, 0.80, 0.95);
-        writeInst(buf, n++, x, y + h / 2, w, 1.0, 0.37, 0.38, 0.34, 0.88);
-        writeInst(buf, n++, x - w / 2, y, 1.0, h, 0.37, 0.38, 0.34, 0.88);
-        writeInst(buf, n++, x + w / 2, y, 1.0, h, 0.98, 0.93, 0.80, 0.95);
-        writeInst(buf, n++, x, y - h * 0.25, w * 0.92, 0.45, 0.46, 0.45, 0.40, 0.65);
-        writeInst(buf, n++, x, y + h * 0.25, w * 0.92, 0.45, 0.46, 0.45, 0.40, 0.65);
-        writeInst(buf, n++, x - w * 0.25, y, 0.45, h * 0.82, 0.46, 0.45, 0.40, 0.65);
-        writeInst(buf, n++, x + w * 0.25, y, 0.45, h * 0.82, 0.46, 0.45, 0.40, 0.65);
+        writeInst(buf, n++, x, y, w, h, 0.66, 0.70, 0.70, 1);
+        writeInst(buf, n++, x, y - h / 2, w, 0.85, 0.44, 0.49, 0.50, 0.48);
+        writeInst(buf, n++, x, y + h / 2, w, 1.0, 0.25, 0.31, 0.33, 0.92);
+        writeInst(buf, n++, x - w / 2, y, 1.0, h, 0.25, 0.31, 0.33, 0.92);
+        writeInst(buf, n++, x + w / 2, y, 1.0, h, 0.58, 0.63, 0.63, 0.72);
+        writeInst(buf, n++, x, y - h * 0.25, w * 0.92, 0.55, 0.38, 0.44, 0.46, 0.82);
+        writeInst(buf, n++, x, y + h * 0.25, w * 0.92, 0.55, 0.38, 0.44, 0.46, 0.82);
+        writeInst(buf, n++, x - w * 0.25, y, 0.55, h * 0.82, 0.38, 0.44, 0.46, 0.78);
+        writeInst(buf, n++, x + w * 0.25, y, 0.55, h * 0.82, 0.38, 0.44, 0.46, 0.78);
+        const bayRows = Math.max(1, Math.min(3, Math.floor(h / 36)));
+        for (let i = 0; i < bayRows; i++) {
+          const yy = y - h * 0.30 + i * (h * 0.60 / Math.max(1, bayRows - 1));
+          writeInst(buf, n++, x, yy, w * 0.76, 0.55, 0.38, 0.44, 0.46, 0.30);
+        }
+        const bayCols = Math.max(1, Math.min(3, Math.floor(w / 44)));
+        for (let i = 0; i < bayCols; i++) {
+          const xx = x - w * 0.30 + i * (w * 0.60 / Math.max(1, bayCols - 1));
+          writeInst(buf, n++, xx, y, 0.75, h * 0.60, 0.48, 0.54, 0.55, 0.62);
+        }
+        writeInst(buf, n++, x, y, w * 0.54, h * 0.34, 0.57, 0.64, 0.65, 0.84);
+        writeInst(buf, n++, x, y - h * 0.16, w * 0.48, 0.55, 0.36, 0.42, 0.44, 0.28);
+        writeInst(buf, n++, x, y + h * 0.16, w * 0.48, 0.7, 0.30, 0.36, 0.38, 0.74);
+        const bayW = Math.max(10, Math.min(18, w * 0.18));
+        const bayH = Math.max(12, Math.min(20, h * 0.26));
+        for (let i = 0; i < 2; i++) {
+          const px = x + (i === 0 ? -0.26 : 0.26) * w;
+          const py = y + (hash(220 + i) < 0.5 ? -0.24 : 0.24) * h;
+          writeInst(buf, n++, px, py, bayW, bayH, 0.60, 0.66, 0.66, 1);
+          writeInst(buf, n++, px, py - bayH * 0.38, bayW * 0.80, 0.55, 0.35, 0.42, 0.45, 1);
+          writeInst(buf, n++, px - bayW * 0.38, py, 0.55, bayH * 0.72, 0.35, 0.42, 0.45, 1);
+          writeInst(buf, n++, px + bayW * 0.38, py, 0.55, bayH * 0.72, 0.35, 0.42, 0.45, 1);
+        }
         writeInst(buf, n++, x - w * 0.30, y - h * 0.08, w * 0.22, 0.35,
-          0.38, 0.36, 0.30, 0.55);
+          0.30, 0.36, 0.38, 0.55);
         writeInst(buf, n++, x + w * 0.20, y + h * 0.12, w * 0.20, 0.35,
-          0.38, 0.36, 0.30, 0.55);
+          0.30, 0.36, 0.38, 0.55);
         break;
       }
       case 'steel_plate': {
@@ -2766,7 +2903,7 @@ export class Game {
       }
       case 'hazard_stripe': {
         // 隴ｦ蜻翫せ繝医Λ繧､繝・ 鮟・・繝ｼ繧ｹ + 鮟偵・譁懊ａ繧ｹ繝医Λ繧､繝・
-        writeInst(buf, n++, x, y, w, h, 0.92, 0.78, 0.12, 1);
+        writeInst(buf, n++, x, y, w, h, 0.70, 0.58, 0.22, 0.82);
         // 譁懊ａ繧ｹ繝医Λ繧､繝励ｒ 6 譛ｬ縲∬ｧ貞ｺｦ 0.6rad (~34ﾂｰ)
         const stripeAngle = 0.6;
         const stripeW = Math.max(w, h) * 1.6;
@@ -2776,14 +2913,14 @@ export class Game {
         for (let i = -count; i <= count; i++) {
           const ox = (i * step);
           writeInst(buf, n++, x + ox * Math.cos(stripeAngle), y + ox * Math.sin(stripeAngle),
-            stripeW, stripeH, 0.14, 0.12, 0.10, 0.95, stripeAngle);
+            stripeW, stripeH, 0.16, 0.15, 0.13, 0.82, stripeAngle);
         }
         // 荳願ｾｺ縺ｮ豼・＞繝ｩ繧､繝ｳ (譫)
         writeInst(buf, n++, x, y - h * 0.45, w * 0.98, 0.7, 0.14, 0.12, 0.10, 0.9);
         writeInst(buf, n++, x, y + h * 0.45, w * 0.98, 0.7, 0.14, 0.12, 0.10, 0.9);
         // 鞫ｩ閠・(譏弱ｋ縺・逃繧・2 縺､)
-        writeInst(buf, n++, x - w * 0.12, y, w * 0.2, 1.0, 0.98, 0.88, 0.40, 0.55);
-        writeInst(buf, n++, x + w * 0.22, y + h * 0.08, w * 0.15, 1.0, 0.98, 0.88, 0.40, 0.55);
+        writeInst(buf, n++, x - w * 0.12, y, w * 0.2, 1.0, 0.76, 0.66, 0.36, 0.34);
+        writeInst(buf, n++, x + w * 0.22, y + h * 0.08, w * 0.15, 1.0, 0.76, 0.66, 0.36, 0.34);
         break;
       }
     }
@@ -2791,7 +2928,7 @@ export class Game {
   }
 
   private drawGroundDecal(buf: Float32Array, idx: number, decal: GroundDecal): number {
-    const alpha = decal.alpha ?? 1;
+    const alpha = SOLID_GROUND_DECAL_KINDS.has(decal.kind) ? 1 : decal.alpha ?? 1;
     const rot = decal.rot ?? 0;
     const hash = (i: number) => {
       const v = Math.sin(decal.x * 18.371 + decal.y * 47.113 + i * 23.719) * 43758.5453;
@@ -2811,44 +2948,32 @@ export class Game {
     switch (decal.kind) {
       case 'plaza': {
         let n = 0;
-        write(n++, decal.x, decal.y - decal.h / 2, decal.w, 1.1, [0.96, 0.86, 0.60, 0.54], rot);
-        write(n++, decal.x, decal.y + decal.h / 2, decal.w, 1.1, [0.30, 0.31, 0.28, 0.46], rot);
-        write(n++, decal.x - decal.w / 2, decal.y, 1.1, decal.h, [0.30, 0.31, 0.28, 0.42], rot);
-        write(n++, decal.x + decal.w / 2, decal.y, 1.1, decal.h, [0.96, 0.86, 0.60, 0.48], rot);
-        write(n++, decal.x, decal.y, decal.w * 0.78, 0.8, [0.90, 0.78, 0.54, 0.42], rot);
-        write(n++, decal.x, decal.y + decal.h * 0.22, decal.w * 0.65, 0.7, [0.90, 0.78, 0.54, 0.34], rot);
+        write(n++, decal.x, decal.y, decal.w, decal.h, [0.62, 0.59, 0.49, 1], rot);
+        write(n++, decal.x, decal.y - decal.h / 2, decal.w, 1.1, [0.66, 0.62, 0.50, 1], rot);
+        write(n++, decal.x, decal.y + decal.h / 2, decal.w, 1.1, [0.30, 0.31, 0.28, 1], rot);
+        write(n++, decal.x - decal.w / 2, decal.y, 1.1, decal.h, [0.30, 0.31, 0.28, 1], rot);
+        write(n++, decal.x + decal.w / 2, decal.y, 1.1, decal.h, [0.66, 0.62, 0.50, 1], rot);
+        write(n++, decal.x, decal.y, decal.w * 0.78, 0.8, [0.62, 0.58, 0.48, 1], rot);
+        write(n++, decal.x, decal.y + decal.h * 0.22, decal.w * 0.65, 0.7, [0.45, 0.43, 0.36, 1], rot);
         return n;
       }
       case 'tile_patch':
         return 0;
-      case 'feed_mark': {
-        const ux = Math.cos(rot);
-        const uy = Math.sin(rot);
-        write(0, decal.x, decal.y, decal.w, decal.h, [0.54, 0.76, 0.44, 0.32], rot);
-        write(1, decal.x + ux * decal.w * 0.22, decal.y + uy * decal.w * 0.22, 12, 1.8, [0.76, 0.86, 0.54, 0.46], rot + 0.55);
-        write(2, decal.x + ux * decal.w * 0.22, decal.y + uy * decal.w * 0.22, 12, 1.8, [0.76, 0.86, 0.54, 0.46], rot - 0.55);
-        return 3;
-      }
+      case 'feed_mark':
+        return 0;
       case 'score_mark':
-        write(0, decal.x, decal.y - decal.h * 0.35, decal.w, 0.75, [0.86, 0.67, 0.22, 0.28], rot);
-        write(1, decal.x, decal.y + decal.h * 0.35, decal.w * 0.82, 0.75, [0.96, 0.83, 0.36, 0.24], rot);
-        return 2;
+        return 0;
       case 'impact_mark':
-        write(0, decal.x, decal.y, decal.w, decal.h, [0.23, 0.20, 0.17, 0.36], rot);
-        write(1, decal.x + 2, decal.y - 1, decal.w * 0.52, decal.h * 0.55, [0.06, 0.05, 0.05, 0.24], rot, 1);
-        return 2;
+        return 0;
       case 'crowd_spot':
-        write(0, decal.x - decal.w * 0.18, decal.y + decal.h * 0.12, decal.w * 0.34, 0.8, [0.95, 0.70, 0.36, 0.14], rot);
-        write(1, decal.x + decal.w * 0.20, decal.y - decal.h * 0.08, decal.w * 0.30, 0.8, [0.92, 0.58, 0.30, 0.12], rot);
-        write(2, decal.x, decal.y, decal.w * 0.54, 0.65, [0.84, 0.48, 0.26, 0.10], rot);
-        return 3;
+        return 0;
       case 'danger_stripe': {
         let n = 0;
         write(n++, decal.x, decal.y, decal.w, decal.h, [0.20, 0.18, 0.13, 0.46], rot);
         const stripes = Math.max(3, Math.floor(decal.w / 18));
         for (let i = 0; i < stripes; i++) {
           const p = -decal.w * 0.42 + i * (decal.w * 0.84 / Math.max(1, stripes - 1));
-          write(n++, decal.x + Math.cos(rot) * p, decal.y + Math.sin(rot) * p, 8, decal.h * 0.62, [0.90, 0.68, 0.16, 0.52], rot + 0.58);
+          write(n++, decal.x + Math.cos(rot) * p, decal.y + Math.sin(rot) * p, 8, decal.h * 0.62, [0.72, 0.58, 0.22, 0.34], rot + 0.58);
         }
         return n;
       }
@@ -2860,12 +2985,10 @@ export class Game {
         return 0;
       case 'lot_frame': {
         let n = 0;
-        write(n++, decal.x, decal.y - decal.h / 2, decal.w, 1.05, [0.20, 0.23, 0.20, 0.68], rot);
-        write(n++, decal.x, decal.y + decal.h / 2, decal.w, 1.05, [0.98, 0.86, 0.58, 0.46], rot);
-        write(n++, decal.x - decal.w / 2, decal.y, 1.05, decal.h, [0.22, 0.25, 0.22, 0.56], rot);
-        write(n++, decal.x + decal.w / 2, decal.y, 1.05, decal.h, [0.98, 0.86, 0.58, 0.40], rot);
-        write(n++, decal.x + (hash(1) - 0.5) * decal.w * 0.30, decal.y, decal.w * 0.72, 0.45, [0.26, 0.28, 0.25, 0.26], rot);
-        write(n++, decal.x, decal.y + (hash(2) - 0.5) * decal.h * 0.35, 0.45, decal.h * 0.70, [0.26, 0.28, 0.25, 0.24], rot);
+        write(n++, decal.x, decal.y - decal.h / 2, decal.w, 0.75, [0.30, 0.31, 0.27, 0.72], rot);
+        write(n++, decal.x, decal.y + decal.h / 2, decal.w, 0.75, [0.40, 0.40, 0.35, 0.38], rot);
+        write(n++, decal.x - decal.w / 2, decal.y, 0.75, decal.h, [0.30, 0.31, 0.27, 0.72], rot);
+        write(n++, decal.x + decal.w / 2, decal.y, 0.75, decal.h, [0.40, 0.40, 0.35, 0.38], rot);
         return n;
       }
       case 'shop_stripe': {
@@ -2881,18 +3004,14 @@ export class Game {
             decal.y + Math.sin(rot) * p,
             decal.w / (stripes + 1),
             decal.h * 0.92,
-            warm ? [0.92, 0.52, 0.27, 0.48] : [0.92, 0.86, 0.62, 0.38],
+            warm ? [0.80, 0.46, 0.30, 0.36] : [0.68, 0.64, 0.52, 0.26],
             rot,
           );
         }
         return n;
       }
       case 'planter':
-        write(0, decal.x, decal.y + decal.h * 0.24, decal.w * 1.15, decal.h * 0.42, [0.28, 0.22, 0.16, 0.42], rot, 1);
-        write(1, decal.x, decal.y, decal.w, decal.h, [0.22, 0.46, 0.22, 0.58], rot, 1);
-        write(2, decal.x - decal.w * 0.23, decal.y - decal.h * 0.05, decal.w * 0.45, decal.h * 0.45, [0.36, 0.62, 0.30, 0.50], rot, 1);
-        write(3, decal.x + decal.w * 0.22, decal.y + decal.h * 0.04, decal.w * 0.42, decal.h * 0.42, [0.16, 0.36, 0.18, 0.50], rot, 1);
-        return 4;
+        return 0;
       case 'curb_line':
         write(0, decal.x, decal.y, decal.w, decal.h, [0.76, 0.72, 0.61, 0.42], rot);
         write(1, decal.x, decal.y - decal.h * 0.38, decal.w, 0.45, [0.34, 0.36, 0.32, 0.24], rot);
@@ -2902,14 +3021,14 @@ export class Game {
         const dashCount = Math.max(3, Math.floor(decal.w / 42));
         for (let i = 0; i < dashCount; i++) {
           const p = -decal.w * 0.42 + i * (decal.w * 0.84 / Math.max(1, dashCount - 1));
-          write(n++, decal.x + Math.cos(rot) * p, decal.y + Math.sin(rot) * p, 18, decal.h, [0.88, 0.82, 0.62, 0.32], rot);
+          write(n++, decal.x + Math.cos(rot) * p, decal.y + Math.sin(rot) * p, 18, decal.h, [0.76, 0.74, 0.68, 0.24], rot);
         }
         return n;
       }
       case 'junction_pad':
         write(0, decal.x, decal.y, decal.w, decal.h, [0.36, 0.36, 0.32, 0.62], rot);
-        write(1, decal.x, decal.y, decal.w * 0.82, 1.0, [0.78, 0.74, 0.58, 0.24], rot);
-        write(2, decal.x, decal.y, 1.0, decal.h * 0.82, [0.78, 0.74, 0.58, 0.22], rot);
+        write(1, decal.x, decal.y, decal.w * 0.82, 1.0, [0.56, 0.55, 0.49, 0.18], rot);
+        write(2, decal.x, decal.y, 1.0, decal.h * 0.82, [0.56, 0.55, 0.49, 0.16], rot);
         return 3;
       case 'road_end_cap':
         write(0, decal.x, decal.y, decal.w, decal.h, [0.62, 0.58, 0.48, 0.70], rot);
@@ -2922,7 +3041,7 @@ export class Game {
         const stripes = Math.max(4, Math.floor(decal.w / 7));
         for (let i = 0; i < stripes; i++) {
           const p = -decal.w * 0.44 + i * (decal.w * 0.88 / Math.max(1, stripes - 1));
-          write(n++, decal.x + Math.cos(rot) * p, decal.y + Math.sin(rot) * p, 3.6, decal.h * 0.84, [0.92, 0.88, 0.74, 0.58], rot);
+          write(n++, decal.x + Math.cos(rot) * p, decal.y + Math.sin(rot) * p, 3.6, decal.h * 0.84, [0.82, 0.81, 0.76, 0.46], rot);
         }
         return n;
       }
@@ -2931,40 +3050,40 @@ export class Game {
         const slots = Math.max(2, Math.floor(decal.w / 30));
         for (let i = 0; i <= slots; i++) {
           const p = -decal.w * 0.5 + i * (decal.w / slots);
-          write(n++, decal.x + Math.cos(rot) * p, decal.y + Math.sin(rot) * p, 0.8, decal.h * 0.82, [0.88, 0.84, 0.66, 0.42], rot);
+          write(n++, decal.x + Math.cos(rot) * p, decal.y + Math.sin(rot) * p, 0.7, decal.h * 0.76, [0.50, 0.50, 0.45, 0.22], rot);
         }
-        write(n++, decal.x, decal.y - decal.h * 0.42, decal.w, 0.65, [0.88, 0.84, 0.66, 0.38], rot);
+        write(n++, decal.x, decal.y - decal.h * 0.42, decal.w, 0.55, [0.50, 0.50, 0.45, 0.20], rot);
         return n;
       }
       case 'frontage_pad': {
         let n = 0;
-        write(n++, decal.x, decal.y, decal.w, decal.h, [0.86, 0.76, 0.52, 0.92], rot);
-        write(n++, decal.x, decal.y - decal.h / 2, decal.w, 1.2, [1.00, 0.88, 0.58, 0.88], rot);
-        write(n++, decal.x, decal.y + decal.h / 2, decal.w, 1.2, [0.28, 0.30, 0.27, 0.84], rot);
-        write(n++, decal.x - decal.w / 2, decal.y, 1.2, decal.h, [0.30, 0.32, 0.28, 0.78], rot);
-        write(n++, decal.x + decal.w / 2, decal.y, 1.2, decal.h, [1.00, 0.88, 0.58, 0.76], rot);
+        write(n++, decal.x, decal.y, decal.w, decal.h, [0.64, 0.60, 0.50, 1], rot);
+        write(n++, decal.x, decal.y - decal.h / 2, decal.w, 0.75, [0.52, 0.50, 0.43, 1], rot);
+        write(n++, decal.x, decal.y + decal.h / 2, decal.w, 0.75, [0.34, 0.34, 0.30, 1], rot);
+        write(n++, decal.x - decal.w / 2, decal.y, 0.75, decal.h, [0.34, 0.34, 0.30, 1], rot);
+        write(n++, decal.x + decal.w / 2, decal.y, 0.75, decal.h, [0.52, 0.50, 0.43, 1], rot);
         const divisions = Math.max(2, Math.min(5, Math.floor(decal.w / 42)));
         for (let i = 1; i < divisions; i++) {
           const p = -decal.w * 0.5 + i * (decal.w / divisions);
-          write(n++, decal.x + Math.cos(rot) * p, decal.y + Math.sin(rot) * p, 0.75, decal.h * 0.70, [0.42, 0.43, 0.37, 0.52], rot);
+          write(n++, decal.x + Math.cos(rot) * p, decal.y + Math.sin(rot) * p, 0.55, decal.h * 0.60, [0.42, 0.41, 0.35, 1], rot);
         }
         return n;
       }
       case 'driveway': {
         let n = 0;
-        write(n++, decal.x, decal.y, decal.w, decal.h, [0.90, 0.80, 0.58, 0.92], rot);
-        write(n++, decal.x, decal.y - decal.h * 0.42, decal.w * 0.94, 0.8, [0.30, 0.31, 0.28, 0.72], rot);
-        write(n++, decal.x, decal.y + decal.h * 0.42, decal.w * 0.94, 0.8, [1.00, 0.90, 0.62, 0.66], rot);
-        const markers = Math.max(2, Math.min(5, Math.floor(decal.w / 34)));
+        write(n++, decal.x, decal.y, decal.w, decal.h, [0.60, 0.58, 0.50, 1], rot);
+        write(n++, decal.x, decal.y - decal.h * 0.42, decal.w * 0.94, 0.65, [0.32, 0.33, 0.30, 1], rot);
+        write(n++, decal.x, decal.y + decal.h * 0.42, decal.w * 0.94, 0.65, [0.48, 0.47, 0.41, 1], rot);
+        const markers = Math.max(1, Math.min(3, Math.floor(decal.w / 48)));
         for (let i = 0; i < markers; i++) {
           const p = -decal.w * 0.40 + i * (decal.w * 0.80 / Math.max(1, markers - 1));
-          write(n++, decal.x + Math.cos(rot) * p, decal.y + Math.sin(rot) * p, 1.2, decal.h * 0.55, [0.45, 0.45, 0.38, 0.54], rot);
+          write(n++, decal.x + Math.cos(rot) * p, decal.y + Math.sin(rot) * p, 0.9, decal.h * 0.45, [0.42, 0.41, 0.35, 1], rot);
         }
         return n;
       }
       case 'curb_corner': {
         let n = 0;
-        write(n++, decal.x, decal.y, decal.w, decal.h, [0.78, 0.72, 0.55, 0.58], rot);
+        write(n++, decal.x, decal.y, decal.w, decal.h, [0.58, 0.56, 0.48, 0.42], rot);
         write(n++, decal.x + Math.cos(rot) * decal.w * 0.20, decal.y + Math.sin(rot) * decal.w * 0.20, decal.w * 0.68, 1.1, [0.36, 0.38, 0.34, 0.70], rot);
         write(n++, decal.x - Math.sin(rot) * decal.h * 0.20, decal.y + Math.cos(rot) * decal.h * 0.20, 1.1, decal.h * 0.68, [0.36, 0.38, 0.34, 0.70], rot);
         return n;
@@ -3386,15 +3505,15 @@ export class Game {
   private fillSlopes(buf: Float32Array, start: number): number {
     let n = start;
     const sL = this.getSlopeL(), sR = this.getSlopeR();
-    // 譛ｬ菴・(邱・
-    writeInst(buf, n++, sL.cx, sL.cy, sL.hw * 2, sL.hh * 2, 0.38, 0.58, 0.30, 1, sL.angle);
-    writeInst(buf, n++, sR.cx, sR.cy, sR.hw * 2, sR.hh * 2, 0.38, 0.58, 0.30, 1, sR.angle);
-    // 荳願ｾｺ繝上う繝ｩ繧､繝・(繝懊・繝ｫ縺梧ｻ代ｋ髱｢繧堤､ｺ縺吶∫區繝ｩ繧､繝ｳ)
-    writeInst(buf, n++, sL.cx, sL.cy + sL.hh - 0.5, sL.hw * 2, 1.2, 0.92, 0.92, 0.88, 0.85, sL.angle);
-    writeInst(buf, n++, sR.cx, sR.cy + sR.hh - 0.5, sR.hw * 2, 1.2, 0.92, 0.92, 0.88, 0.85, sR.angle);
-    // 荳玖ｾｺ縺ｮ蠖ｱ (遶倶ｽ捺─縲∵囓)
-    writeInst(buf, n++, sL.cx, sL.cy - sL.hh + 0.5, sL.hw * 2, 1.0, 0.22, 0.34, 0.18, 0.85, sL.angle);
-    writeInst(buf, n++, sR.cx, sR.cy - sR.hh + 0.5, sR.hw * 2, 1.0, 0.22, 0.34, 0.18, 0.85, sR.angle);
+    // Solid pinball guide rails. Avoid green translucent-looking bands over the city.
+    writeInst(buf, n++, sL.cx, sL.cy, sL.hw * 2, sL.hh * 2, 0.30, 0.35, 0.36, 1, sL.angle);
+    writeInst(buf, n++, sR.cx, sR.cy, sR.hw * 2, sR.hh * 2, 0.30, 0.35, 0.36, 1, sR.angle);
+    writeInst(buf, n++, sL.cx, sL.cy, sL.hw * 2 - 5, sL.hh * 2 - 3, 0.54, 0.63, 0.64, 1, sL.angle);
+    writeInst(buf, n++, sR.cx, sR.cy, sR.hw * 2 - 5, sR.hh * 2 - 3, 0.54, 0.63, 0.64, 1, sR.angle);
+    writeInst(buf, n++, sL.cx, sL.cy + sL.hh - 0.5, sL.hw * 2 - 4, 1.2, 0.98, 0.86, 0.36, 1, sL.angle);
+    writeInst(buf, n++, sR.cx, sR.cy + sR.hh - 0.5, sR.hw * 2 - 4, 1.2, 0.98, 0.86, 0.36, 1, sR.angle);
+    writeInst(buf, n++, sL.cx, sL.cy - sL.hh + 0.5, sL.hw * 2 - 4, 1.0, 0.12, 0.16, 0.18, 1, sL.angle);
+    writeInst(buf, n++, sR.cx, sR.cy - sR.hh + 0.5, sR.hw * 2 - 4, 1.0, 0.12, 0.16, 0.18, 1, sR.angle);
     return n - start;
   }
 

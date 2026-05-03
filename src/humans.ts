@@ -868,6 +868,13 @@ export class HumanManager {
       const sx = C.HUMAN_W * this.scaleX[i] * ks * bodyW;
       const sy = C.HUMAN_H * (2 - this.scaleX[i]) * ks * bodyH;
       const px = this.px[i];
+      const rewardId = this.rewardKind[i];
+      const isHighlightedHuman = rewardId !== HUMAN_REWARD_KIND_IDS.runner || this.value[i] > 1;
+      const cueColor: readonly [number, number, number] =
+        rewardId === HUMAN_REWARD_KIND_IDS.vip ? [1.00, 0.36, 0.92] :
+        rewardId === HUMAN_REWARD_KIND_IDS.marshal ? [0.36, 0.92, 1.00] :
+        rewardId === HUMAN_REWARD_KIND_IDS.crowd ? [1.00, 0.78, 0.24] :
+        [0.92, 1.00, 0.36];
 
       // === 頭身比 (build による) — 頭サイズ・肩幅・腰位置 ===
       // 大人標準: 頭=sx*1.00、肩幅=sx*0.82、胴体=sy*0.30
@@ -913,9 +920,14 @@ export class HumanManager {
       const hairB = Math.min(1, hairBase[2] * hairShadeK);
       const [shoeR, shoeG, shoeB] = SHOE_PALETTE[v.shoeIdx];
       const [sr0, sg0, sb0] = kind.shirt;
-      const sr = Math.min(1, sr0 * shirtT[0]);
-      const sg = Math.min(1, sg0 * shirtT[1]);
-      const sb = Math.min(1, sb0 * shirtT[2]);
+      let sr = Math.min(1, sr0 * shirtT[0]);
+      let sg = Math.min(1, sg0 * shirtT[1]);
+      let sb = Math.min(1, sb0 * shirtT[2]);
+      if (isHighlightedHuman) {
+        sr = Math.min(1, sr * 1.12 + cueColor[0] * 0.14);
+        sg = Math.min(1, sg * 1.12 + cueColor[1] * 0.14);
+        sb = Math.min(1, sb * 1.12 + cueColor[2] * 0.14);
+      }
       const [pr0, pg0, pb0] = kind.pants ?? kind.shirt;
       const pr = Math.min(1, pr0 * pantsT[0]);
       const pg = Math.min(1, pg0 * pantsT[1]);
@@ -935,6 +947,17 @@ export class HumanManager {
       // === ① 足下の影 ===
       writeInst(buf, n++, px, py - sy * 0.49, sx * 1.15, sy * 0.07,
         0.05, 0.05, 0.08, 0.35, 0, 1);
+      if (isHighlightedHuman) {
+        const markerY = footY - sy * 0.16;
+        const markerW = Math.max(4.2, sx * 1.85);
+        const markerH = Math.max(0.65, sy * 0.07);
+        writeInst(buf, n++, px, markerY, markerW, markerH,
+          cueColor[0], cueColor[1], cueColor[2], 1, 0, 0);
+        writeInst(buf, n++, px - markerW * 0.44, markerY + sy * 0.10, markerH, sy * 0.22,
+          cueColor[0] * 0.76, cueColor[1] * 0.76, cueColor[2] * 0.76, 1, 0, 0);
+        writeInst(buf, n++, px + markerW * 0.44, markerY + sy * 0.10, markerH, sy * 0.22,
+          cueColor[0] * 0.76, cueColor[1] * 0.76, cueColor[2] * 0.76, 1, 0, 0);
+      }
 
       // === ② 靴/足 (小さな円) — 歩行 stride でずらす ===
       writeInst(buf, n++, px - sx * 0.22 - strideOffset, footY, sx * 0.32, sy * 0.10,

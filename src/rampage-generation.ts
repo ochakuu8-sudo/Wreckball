@@ -126,6 +126,12 @@ interface RoadGraph {
   topX: number;
 }
 
+interface ConnectedBranch {
+  start: RoadNode;
+  end: RoadNode;
+  dir: number;
+}
+
 interface StreetLayout {
   mainCorridorX: number;
   primaryY: number;
@@ -149,7 +155,30 @@ interface StreetLayout {
 }
 
 type FrontageSide = 'north' | 'south' | 'east' | 'west' | 'center';
-type CityParcelKind = 'shops' | 'homes' | 'towers' | 'civic' | 'station' | 'park' | 'construction';
+type CityParcelDetail = 'core' | 'infill' | 'accent' | 'coverage';
+type CoverageCellKind = 'building' | 'yard' | 'parking' | 'workyard' | 'plaza';
+type CoverageRoadAffinity = 'main' | 'side' | 'alley' | 'open';
+type CityParcelKind =
+  | 'shops'
+  | 'homes'
+  | 'towers'
+  | 'civic'
+  | 'station'
+  | 'park'
+  | 'construction'
+  | 'school'
+  | 'shrine'
+  | 'old_town'
+  | 'mansion_block'
+  | 'back_alley'
+  | 'rail_edge'
+  | 'bathhouse'
+  | 'nightlife'
+  | 'roadside'
+  | 'industrial'
+  | 'harbor'
+  | 'festival'
+  | 'landmark';
 
 interface FrontageSlot {
   x: number;
@@ -180,12 +209,43 @@ interface ParcelDecorPlan {
   alpha?: number;
 }
 
+interface CoverageCell extends Rect {
+  kind: CoverageCellKind;
+  parcelKind: CityParcelKind;
+  frontageSide: FrontageSide;
+  roadAffinity: CoverageRoadAffinity;
+  index: number;
+}
+
 interface CityParcel extends Rect {
   id: string;
   kind: CityParcelKind;
+  detail: CityParcelDetail;
   frontageSide: FrontageSide;
+  coverageKind?: CoverageCellKind;
+  roadAffinity?: CoverageRoadAffinity;
   slots: FrontageSlot[];
   decor: ParcelDecorPlan[];
+}
+
+type SpecialMaterialPolicy = 'standard' | 'restricted';
+type ParcelColorFamily = 'warm' | 'residential' | 'green' | 'cool' | 'industrial' | 'wafu' | 'event';
+
+interface ParcelGroundPalette {
+  base: GroundTile['type'];
+  frontage: GroundTile['type'];
+  accent?: GroundTile['type'];
+  coverageBase: GroundTile['type'];
+  coverageFrontage: GroundTile['type'];
+}
+
+interface ParcelVisualProfile {
+  groundPalette: ParcelGroundPalette;
+  buildingPool: readonly C.BuildingSize[];
+  furniturePool: readonly FurnitureType[];
+  smallFallbackBuildings: readonly C.BuildingSize[];
+  allowedCoverageUses: readonly CoverageCellKind[];
+  specialMaterialPolicy: SpecialMaterialPolicy;
 }
 
 const SMALL_HOMES: readonly C.BuildingSize[] = [
@@ -233,6 +293,64 @@ const DOWNTOWN_BUILDINGS: readonly C.BuildingSize[] = [
   'bank', 'movie_theater', 'pachinko', 'karaoke',
 ];
 
+const SCHOOL_BUILDINGS: readonly C.BuildingSize[] = [
+  'school', 'daycare', 'clinic', 'library',
+];
+
+const SHRINE_BUILDINGS: readonly C.BuildingSize[] = [
+  'shrine', 'temple', 'pagoda', 'tahoto', 'dojo', 'kominka',
+];
+
+const OLD_TOWN_BUILDINGS: readonly C.BuildingSize[] = [
+  'machiya', 'kura', 'chaya', 'wagashi', 'kimono_shop', 'sushi_ya',
+  'ryokan', 'onsen_inn', 'kominka',
+];
+
+const MANSION_BLOCK_BUILDINGS: readonly C.BuildingSize[] = [
+  'mansion', 'duplex', 'bungalow', 'townhouse', 'greenhouse', 'garage',
+];
+
+const BACK_ALLEY_BUILDINGS: readonly C.BuildingSize[] = [
+  'garage', 'shed', 'kura', 'kominka', 'laundromat', 'warehouse', 'house',
+];
+
+const RAIL_EDGE_BUILDINGS: readonly C.BuildingSize[] = [
+  'train_station', 'bus_terminal_shelter', 'parking', 'convenience', 'garage',
+];
+
+const BATHHOUSE_BUILDINGS: readonly C.BuildingSize[] = [
+  'onsen_inn', 'ryokan', 'chaya', 'machiya', 'kura', 'wagashi',
+];
+
+const NIGHTLIFE_BUILDINGS: readonly C.BuildingSize[] = [
+  'snack', 'love_hotel', 'business_hotel', 'mahjong_parlor', 'club',
+  'capsule_hotel', 'karaoke', 'pachinko',
+];
+
+const ROADSIDE_BUILDINGS: readonly C.BuildingSize[] = [
+  'gas_station', 'laundromat', 'florist', 'supermarket', 'parking',
+  'convenience', 'garage',
+];
+
+const INDUSTRIAL_BUILDINGS: readonly C.BuildingSize[] = [
+  'warehouse', 'factory_stack', 'container_stack', 'crane_gantry', 'silo',
+  'water_tower', 'radio_tower',
+];
+
+const HARBOR_BUILDINGS: readonly C.BuildingSize[] = [
+  'crane_gantry', 'container_stack', 'warehouse', 'silo', 'water_tower',
+];
+
+const FESTIVAL_BUILDINGS: readonly C.BuildingSize[] = [
+  'yatai', 'big_tent', 'carousel', 'ferris_wheel', 'roller_coaster',
+  'fountain_pavilion',
+];
+
+const LANDMARK_BUILDINGS: readonly C.BuildingSize[] = [
+  'clock_tower', 'radio_tower', 'water_tower', 'ferris_wheel',
+  'fountain_pavilion', 'museum', 'city_hall',
+];
+
 const MARKET_FURNITURE: readonly FurnitureType[] = [
   'a_frame_sign', 'shop_awning', 'noren', 'chouchin', 'vending',
   'kerbside_vending_pair', 'bicycle_rack', 'milk_crate_stack',
@@ -252,6 +370,205 @@ const DOWNTOWN_FURNITURE: readonly FurnitureType[] = [
   'street_lamp', 'bollard', 'guardrail_short', 'atm', 'newspaper_stand',
   'traffic_cone', 'electric_box', 'taxi_rank_sign',
 ];
+
+const PARCEL_VISUAL_PROFILES: Record<CityParcelKind, ParcelVisualProfile> = {
+  shops: {
+    groundPalette: { base: 'tile', frontage: 'tile', accent: 'stone_pavement', coverageBase: 'tile', coverageFrontage: 'tile' },
+    buildingPool: SHOPPING_STREET_BUILDINGS,
+    furniturePool: ['shop_awning', 'a_frame_sign', 'noren', 'vending', 'kerbside_vending_pair', 'bicycle_rack'],
+    smallFallbackBuildings: ['shop', 'cafe', 'bakery', 'florist', 'yatai'],
+    allowedCoverageUses: ['building', 'parking', 'yard'],
+    specialMaterialPolicy: 'standard',
+  },
+  homes: {
+    groundPalette: { base: 'residential_tile', frontage: 'residential_tile', accent: 'grass', coverageBase: 'residential_tile', coverageFrontage: 'residential_tile' },
+    buildingPool: SMALL_HOMES,
+    furniturePool: ['mailbox', 'post_letter_box', 'wood_fence', 'hedge', 'potted_plant', 'flower_planter_row'],
+    smallFallbackBuildings: ['shed', 'garage', 'house', 'townhouse', 'bungalow'],
+    allowedCoverageUses: ['building', 'yard'],
+    specialMaterialPolicy: 'standard',
+  },
+  towers: {
+    groundPalette: { base: 'concrete', frontage: 'tile', accent: 'city_block', coverageBase: 'concrete', coverageFrontage: 'concrete' },
+    buildingPool: DOWNTOWN_BUILDINGS,
+    furniturePool: ['street_lamp', 'bollard', 'guardrail_short', 'atm', 'newspaper_stand'],
+    smallFallbackBuildings: ['parking', 'shop', 'convenience', 'garage'],
+    allowedCoverageUses: ['building', 'parking', 'plaza'],
+    specialMaterialPolicy: 'standard',
+  },
+  civic: {
+    groundPalette: { base: 'stone_pavement', frontage: 'stone_pavement', accent: 'grass', coverageBase: 'stone_pavement', coverageFrontage: 'stone_pavement' },
+    buildingPool: CIVIC_BUILDINGS,
+    furniturePool: ['bench', 'street_lamp', 'flower_bed', 'flag_pole', 'statue'],
+    smallFallbackBuildings: ['clinic', 'library', 'post_office', 'cafe'],
+    allowedCoverageUses: ['building', 'plaza', 'yard'],
+    specialMaterialPolicy: 'standard',
+  },
+  station: {
+    groundPalette: { base: 'concrete', frontage: 'tile', accent: 'city_block', coverageBase: 'concrete', coverageFrontage: 'concrete' },
+    buildingPool: ['train_station', 'bus_terminal_shelter', 'parking'],
+    furniturePool: ['bus_stop', 'taxi_rank_sign', 'bicycle_rack', 'platform_edge', 'railway_track'],
+    smallFallbackBuildings: ['parking', 'convenience', 'shop', 'garage'],
+    allowedCoverageUses: ['building', 'parking', 'plaza'],
+    specialMaterialPolicy: 'standard',
+  },
+  construction: {
+    groundPalette: { base: 'gravel', frontage: 'steel_plate', accent: 'hazard_stripe', coverageBase: 'gravel', coverageFrontage: 'steel_plate' },
+    buildingPool: ['warehouse', 'parking', 'factory_stack', 'container_stack'],
+    furniturePool: ['traffic_cone', 'guardrail_short', 'sandbags', 'electric_box', 'pallet_stack'],
+    smallFallbackBuildings: ['shed', 'warehouse', 'garage', 'container_stack'],
+    allowedCoverageUses: ['building', 'workyard', 'parking'],
+    specialMaterialPolicy: 'restricted',
+  },
+  park: {
+    groundPalette: { base: 'grass', frontage: 'stone_pavement', accent: 'dirt', coverageBase: 'grass', coverageFrontage: 'stone_pavement' },
+    buildingPool: ['fountain_pavilion', 'library', 'cafe'],
+    furniturePool: ['bench', 'tree', 'flower_bed', 'street_lamp', 'play_structure'],
+    smallFallbackBuildings: ['fountain_pavilion', 'cafe', 'greenhouse'],
+    allowedCoverageUses: ['plaza', 'yard', 'building'],
+    specialMaterialPolicy: 'standard',
+  },
+  school: {
+    groundPalette: { base: 'residential_tile', frontage: 'residential_tile', accent: 'grass', coverageBase: 'residential_tile', coverageFrontage: 'residential_tile' },
+    buildingPool: SCHOOL_BUILDINGS,
+    furniturePool: ['sandbox', 'swing_set', 'jungle_gym', 'slide', 'tree', 'flag_pole'],
+    smallFallbackBuildings: ['school', 'daycare', 'clinic', 'shed'],
+    allowedCoverageUses: ['building', 'yard', 'plaza'],
+    specialMaterialPolicy: 'standard',
+  },
+  shrine: {
+    groundPalette: { base: 'moss', frontage: 'gravel', accent: 'stone_pavement', coverageBase: 'stone_pavement', coverageFrontage: 'gravel' },
+    buildingPool: SHRINE_BUILDINGS,
+    furniturePool: ['torii', 'stone_lantern', 'sando_stone_pillar', 'ema_wall', 'omikuji_stand', 'shrine_fence_red'],
+    smallFallbackBuildings: ['shrine', 'temple', 'dojo', 'kominka'],
+    allowedCoverageUses: ['plaza', 'yard', 'building'],
+    specialMaterialPolicy: 'restricted',
+  },
+  old_town: {
+    groundPalette: { base: 'stone_pavement', frontage: 'wood_deck', accent: 'residential_tile', coverageBase: 'stone_pavement', coverageFrontage: 'stone_pavement' },
+    buildingPool: OLD_TOWN_BUILDINGS,
+    furniturePool: ['noren', 'chouchin', 'bamboo_fence', 'bonsai', 'potted_plant', 'stepping_stones'],
+    smallFallbackBuildings: ['machiya', 'kura', 'chaya', 'wagashi'],
+    allowedCoverageUses: ['building', 'yard', 'plaza'],
+    specialMaterialPolicy: 'restricted',
+  },
+  mansion_block: {
+    groundPalette: { base: 'grass', frontage: 'residential_tile', accent: 'stone_pavement', coverageBase: 'grass', coverageFrontage: 'residential_tile' },
+    buildingPool: MANSION_BLOCK_BUILDINGS,
+    furniturePool: ['post_box', 'pine_tree', 'sakura_tree', 'bush', 'hedge', 'power_pole'],
+    smallFallbackBuildings: ['mansion', 'townhouse', 'duplex', 'bungalow', 'garage'],
+    allowedCoverageUses: ['building', 'yard', 'parking'],
+    specialMaterialPolicy: 'restricted',
+  },
+  back_alley: {
+    groundPalette: { base: 'city_block', frontage: 'concrete', accent: 'oil_stained_concrete', coverageBase: 'city_block', coverageFrontage: 'concrete' },
+    buildingPool: BACK_ALLEY_BUILDINGS,
+    furniturePool: ['dumpster', 'recycling_bin', 'power_pole', 'power_line', 'ac_outdoor_cluster', 'laundry_balcony', 'cat'],
+    smallFallbackBuildings: ['garage', 'shed', 'kura', 'laundromat'],
+    allowedCoverageUses: ['building', 'workyard', 'yard'],
+    specialMaterialPolicy: 'restricted',
+  },
+  rail_edge: {
+    groundPalette: { base: 'concrete', frontage: 'steel_plate', accent: 'city_block', coverageBase: 'concrete', coverageFrontage: 'steel_plate' },
+    buildingPool: RAIL_EDGE_BUILDINGS,
+    furniturePool: ['railway_track', 'railroad_crossing', 'pedestrian_bridge', 'signal_tower', 'platform_edge', 'power_pole'],
+    smallFallbackBuildings: ['bus_terminal_shelter', 'parking', 'convenience', 'garage'],
+    allowedCoverageUses: ['building', 'parking', 'plaza'],
+    specialMaterialPolicy: 'restricted',
+  },
+  bathhouse: {
+    groundPalette: { base: 'stone_pavement', frontage: 'wood_deck', accent: 'fallen_leaves', coverageBase: 'stone_pavement', coverageFrontage: 'wood_deck' },
+    buildingPool: BATHHOUSE_BUILDINGS,
+    furniturePool: ['bathhouse_chimney', 'bamboo_water_fountain', 'sakura_tree', 'pine_tree', 'stone_lantern', 'bamboo_fence', 'koi_pond'],
+    smallFallbackBuildings: ['chaya', 'kura', 'kominka', 'wagashi'],
+    allowedCoverageUses: ['building', 'yard', 'plaza'],
+    specialMaterialPolicy: 'restricted',
+  },
+  nightlife: {
+    groundPalette: { base: 'tile', frontage: 'tile', accent: 'city_block', coverageBase: 'tile', coverageFrontage: 'tile' },
+    buildingPool: NIGHTLIFE_BUILDINGS,
+    furniturePool: ['banner_pole', 'telephone_booth', 'newspaper_stand', 'vending', 'cable_junction_box', 'bicycle_row'],
+    smallFallbackBuildings: ['snack', 'karaoke', 'convenience', 'shop'],
+    allowedCoverageUses: ['building', 'parking'],
+    specialMaterialPolicy: 'restricted',
+  },
+  roadside: {
+    groundPalette: { base: 'concrete', frontage: 'concrete', accent: 'city_block', coverageBase: 'concrete', coverageFrontage: 'concrete' },
+    buildingPool: ROADSIDE_BUILDINGS,
+    furniturePool: ['car', 'traffic_cone', 'guardrail_short', 'street_mirror', 'vending', 'hydrant'],
+    smallFallbackBuildings: ['garage', 'parking', 'convenience', 'florist'],
+    allowedCoverageUses: ['building', 'parking', 'workyard'],
+    specialMaterialPolicy: 'standard',
+  },
+  industrial: {
+    groundPalette: { base: 'steel_plate', frontage: 'steel_plate', accent: 'gravel', coverageBase: 'steel_plate', coverageFrontage: 'steel_plate' },
+    buildingPool: INDUSTRIAL_BUILDINGS,
+    furniturePool: ['drum_can', 'cargo_container', 'forklift', 'pallet_stack', 'water_tank', 'electric_box'],
+    smallFallbackBuildings: ['warehouse', 'garage', 'container_stack', 'shed'],
+    allowedCoverageUses: ['building', 'workyard', 'parking'],
+    specialMaterialPolicy: 'restricted',
+  },
+  harbor: {
+    groundPalette: { base: 'rust_deck', frontage: 'steel_plate', accent: 'harbor_water', coverageBase: 'rust_deck', coverageFrontage: 'steel_plate' },
+    buildingPool: HARBOR_BUILDINGS,
+    furniturePool: ['cargo_container', 'forklift', 'buoy', 'pallet_stack', 'drum_can', 'water_tank'],
+    smallFallbackBuildings: ['warehouse', 'container_stack', 'silo'],
+    allowedCoverageUses: ['building', 'workyard'],
+    specialMaterialPolicy: 'restricted',
+  },
+  festival: {
+    groundPalette: { base: 'tile', frontage: 'red_carpet', accent: 'checker_tile', coverageBase: 'tile', coverageFrontage: 'tile' },
+    buildingPool: FESTIVAL_BUILDINGS,
+    furniturePool: ['ticket_booth', 'balloon_cluster', 'matsuri_drum', 'popcorn_cart', 'parasol', 'chouchin'],
+    smallFallbackBuildings: ['yatai', 'big_tent', 'fountain_pavilion'],
+    allowedCoverageUses: ['plaza', 'building'],
+    specialMaterialPolicy: 'restricted',
+  },
+  landmark: {
+    groundPalette: { base: 'stone_pavement', frontage: 'stone_pavement', accent: 'checker_tile', coverageBase: 'stone_pavement', coverageFrontage: 'stone_pavement' },
+    buildingPool: LANDMARK_BUILDINGS,
+    furniturePool: ['statue', 'fountain_large', 'plaza_tile_circle', 'bench', 'flag_pole', 'street_lamp'],
+    smallFallbackBuildings: ['clock_tower', 'fountain_pavilion', 'museum'],
+    allowedCoverageUses: ['plaza', 'building'],
+    specialMaterialPolicy: 'restricted',
+  },
+};
+
+function parcelProfile(kind: CityParcelKind): ParcelVisualProfile {
+  return PARCEL_VISUAL_PROFILES[kind];
+}
+
+function parcelColorFamily(kind: CityParcelKind): ParcelColorFamily {
+  switch (kind) {
+    case 'shops':
+    case 'nightlife':
+      return 'warm';
+    case 'homes':
+    case 'mansion_block':
+    case 'school':
+      return 'residential';
+    case 'park':
+      return 'green';
+    case 'shrine':
+    case 'old_town':
+    case 'bathhouse':
+      return 'wafu';
+    case 'construction':
+    case 'industrial':
+    case 'harbor':
+    case 'back_alley':
+      return 'industrial';
+    case 'festival':
+    case 'landmark':
+      return 'event';
+    case 'towers':
+    case 'civic':
+    case 'station':
+    case 'roadside':
+    case 'rail_edge':
+      return 'cool';
+  }
+}
 
 const PREPLACED_HUMANS_PER_BAND = 9;
 const GROUND_X = [-135, -45, 45, 135] as const;
@@ -585,7 +902,7 @@ function addConnectedBranch(
   major: boolean,
   style: StreetIntersection['style'],
   preferredDir?: number,
-): void {
+): ConnectedBranch {
   const startX = roadXAtY(graph, y);
   const dir = preferredDir ?? (startX <= 0 ? 1 : -1);
   const start = roadNode(graph, `${role}-junction-${intersections.length}`, startX, y, 'junction');
@@ -598,12 +915,44 @@ function addConnectedBranch(
     const right = roadNode(graph, `${role}-right-${intersections.length}`, rightX, y, 'terminal');
     roadEdge(graph, `${role}-left-edge-${intersections.length}`, left, start, role, cls, width, sidewalk, 'through', false);
     roadEdge(graph, `${role}-right-edge-${intersections.length}`, start, right, role, cls, width, sidewalk, 'through', false);
-    return;
+    return { start, end: dir >= 0 ? right : left, dir };
   }
 
   const endX = clamp(startX + dir * length, C.WORLD_MIN_X + 18, C.WORLD_MAX_X - 18);
   const end = roadNode(graph, `${role}-end-${intersections.length}`, endX, y, 'terminal');
   roadEdge(graph, `${role}-edge-${intersections.length}`, start, end, role, cls, width, sidewalk, endpoint, false);
+  return { start, end, dir };
+}
+
+function addSideLane(
+  graph: RoadGraph,
+  intersections: StreetIntersection[],
+  y: number,
+  length: number,
+  width: number,
+  sidewalk: number,
+  cls: StreetRoadClass,
+  endpoint: StreetRoadEndpoint,
+  major: boolean,
+  style: StreetIntersection['style'],
+  preferredDir?: number,
+): ConnectedBranch {
+  return addConnectedBranch(graph, intersections, 'side', y, length, width, sidewalk, cls, endpoint, major, style, preferredDir);
+}
+
+function addBackAlley(
+  graph: RoadGraph,
+  from: RoadNode,
+  idSeed: string,
+  verticalLength: number,
+  width: number,
+  sidewalk: number,
+  endpoint: StreetRoadEndpoint,
+): RoadNode {
+  const endY = clamp(from.y + verticalLength, from.y - Math.abs(verticalLength), from.y + Math.abs(verticalLength));
+  const end = roadNode(graph, `alley-end-${idSeed}`, from.x, endY, 'terminal');
+  roadEdge(graph, `alley-edge-${idSeed}`, from, end, 'alley', 'lane', width, sidewalk, endpoint, false);
+  return end;
 }
 
 function streetLayoutForTemplate(baseY: number, bandHeight: number, blockIdx: number, templateId: CityBlockTemplateId): StreetLayout {
@@ -679,25 +1028,39 @@ function streetLayoutForTemplate(baseY: number, bandHeight: number, blockIdx: nu
   }
 
   switch (templateId) {
-    case 'shopping_street':
-      addConnectedBranch(graph, junctions, 'side', primaryY, 116, 18, 6, 'lane', 'dead_end', false, 't', branchDir);
+    case 'shopping_street': {
+      const lane = addSideLane(graph, junctions, primaryY, 116, 18, 6, 'lane', 'dead_end', false, 't', branchDir);
+      addBackAlley(graph, lane.end, `shopping-back-${blockIdx}`, secondaryY > primaryY ? 58 : -58, 10, 2, 'driveway');
+      addSideLane(graph, junctions, y(0.80), 72, 12, 3, 'lane', 'driveway', false, 'simple', -branchDir);
       break;
-    case 'residential_lane':
-      addConnectedBranch(graph, junctions, 'side', primaryY, 88, 15, 5, 'lane', 'dead_end', false, 'simple', lean);
+    }
+    case 'residential_lane': {
+      const lane = addSideLane(graph, junctions, primaryY, 88, 15, 5, 'lane', 'dead_end', false, 'simple', lean);
+      addBackAlley(graph, lane.end, `residential-back-${blockIdx}`, secondaryY > primaryY ? 68 : -68, 9, 2, 'dead_end');
+      addSideLane(graph, junctions, secondaryY, 62, 11, 2, 'lane', 'driveway', false, 'simple', -lean);
       break;
+    }
     case 'downtown_crossing':
       addConnectedBranch(graph, junctions, 'side', primaryY, 0, 34, 9, 'avenue', 'through', true, 'full');
+      addConnectedBranch(graph, junctions, 'service', secondaryY, 74, 13, 3, 'lane', 'driveway', false, 'simple', branchDir);
       break;
-    case 'civic_plaza':
-      addConnectedBranch(graph, junctions, 'service', primaryY, 82, 15, 5, 'lane', 'plaza', false, 't', -lean);
+    case 'civic_plaza': {
+      const lane = addConnectedBranch(graph, junctions, 'service', primaryY, 82, 15, 5, 'lane', 'plaza', false, 't', -lean);
+      addBackAlley(graph, lane.end, `civic-back-${blockIdx}`, secondaryY > primaryY ? 56 : -56, 9, 2, 'plaza');
       break;
+    }
     case 'station_front':
-      addConnectedBranch(graph, junctions, 'service', primaryY, 118, 20, 7, 'street', 'plaza', true, 't', branchDir);
-      addConnectedBranch(graph, junctions, 'alley', y(0.68), 84, 14, 5, 'lane', 'driveway', false, 'simple', branchDir);
+      {
+        const lane = addConnectedBranch(graph, junctions, 'service', primaryY, 118, 20, 7, 'street', 'plaza', true, 't', branchDir);
+        addBackAlley(graph, lane.end, `station-back-${blockIdx}`, 64, 10, 2, 'driveway');
+        addConnectedBranch(graph, junctions, 'alley', y(0.68), 84, 12, 2, 'lane', 'driveway', false, 'simple', branchDir);
+      }
       break;
-    case 'construction_edge':
-      addConnectedBranch(graph, junctions, 'service', primaryY, 104, 18, 5, 'lane', 'driveway', false, 't', -lean);
+    case 'construction_edge': {
+      const lane = addConnectedBranch(graph, junctions, 'service', primaryY, 104, 18, 5, 'lane', 'driveway', false, 't', -lean);
+      addBackAlley(graph, lane.end, `construction-back-${blockIdx}`, -62, 10, 2, 'driveway');
       break;
+    }
   }
 
   const roads = graph.edges.map(roadEdgeToSegment).filter((road) => road.w > 0.1 && road.h > 0.1);
@@ -771,11 +1134,15 @@ function roadLayerForStreet(street: StreetLayout): { surfaces: RoadSurface[]; de
   }
 
   for (const road of street.roads) {
-    const curbAlpha = road.role === 'main' ? 0.72 : 0.52;
+    const curbAlpha = road.role === 'main' ? 0.72 : road.role === 'alley' ? 0.34 : 0.52;
+    const laneAlpha =
+      road.role === 'alley' ? 0.16 :
+      road.cls === 'lane' ? 0.34 :
+      0.56;
     if (road.orientation === 'h') {
       addRoadDecal(decals, 'curb', road.x, road.y - road.h / 2, road.w, 1.6, 0, curbAlpha, road.cls);
       addRoadDecal(decals, 'curb', road.x, road.y + road.h / 2, road.w, 1.6, 0, curbAlpha, road.cls);
-      addRoadDecal(decals, 'lane_mark', road.x, road.y, road.w * (road.cls === 'avenue' ? 0.72 : 0.58), 1.2, 0, road.cls === 'lane' ? 0.34 : 0.56, road.cls);
+      addRoadDecal(decals, 'lane_mark', road.x, road.y, road.w * (road.cls === 'avenue' ? 0.72 : 0.58), 1.2, 0, laneAlpha, road.cls);
       if (road.endpoint !== 'through') {
         const endSign = road.x >= street.mainCorridorX ? 1 : -1;
         addRoadDecal(decals, 'endpoint_cap', road.x + endSign * road.w / 2 - endSign * 5, road.y, 12, road.h + road.sidewalk * 1.2, 0, 0.70, road.cls);
@@ -783,7 +1150,10 @@ function roadLayerForStreet(street: StreetLayout): { surfaces: RoadSurface[]; de
     } else {
       addRoadDecal(decals, 'curb', road.x - road.w / 2, road.y, road.h, 1.1, Math.PI / 2, curbAlpha, road.cls);
       addRoadDecal(decals, 'curb', road.x + road.w / 2, road.y, road.h, 1.1, Math.PI / 2, curbAlpha, road.cls);
-      addRoadDecal(decals, 'lane_mark', road.x, road.y, road.h * (road.cls === 'avenue' ? 0.62 : 0.50), 1.0, Math.PI / 2, road.cls === 'lane' ? 0.28 : 0.46, road.cls);
+      addRoadDecal(decals, 'lane_mark', road.x, road.y, road.h * (road.cls === 'avenue' ? 0.62 : 0.50), 1.0, Math.PI / 2, road.role === 'alley' ? 0.12 : road.cls === 'lane' ? 0.28 : 0.46, road.cls);
+      if (road.endpoint !== 'through') {
+        addRoadDecal(decals, 'endpoint_cap', road.x, road.y + road.h / 2 - 5, road.w + road.sidewalk * 1.2, 12, Math.PI / 2, road.role === 'alley' ? 0.42 : 0.62, road.cls);
+      }
     }
   }
 
@@ -805,34 +1175,47 @@ function roadLayerForStreet(street: StreetLayout): { surfaces: RoadSurface[]; de
 }
 
 function buildingPoolForParcel(kind: CityParcelKind): readonly C.BuildingSize[] {
-  switch (kind) {
-    case 'shops': return SHOPPING_STREET_BUILDINGS;
-    case 'homes': return SMALL_HOMES;
-    case 'towers': return DOWNTOWN_BUILDINGS;
-    case 'civic': return CIVIC_BUILDINGS;
-    case 'station': return ['train_station', 'bus_terminal_shelter', 'parking'] as const;
-    case 'construction': return ['warehouse', 'parking', 'factory_stack', 'container_stack'] as const;
-    case 'park': return ['fountain_pavilion', 'library', 'cafe'] as const;
-  }
+  return parcelProfile(kind).buildingPool;
+}
+
+const SMALL_PARCEL_FALLBACK_BUILDINGS: readonly C.BuildingSize[] = [
+  'shed', 'garage', 'house', 'shop', 'cafe',
+];
+
+function buildingFitsParcelSlot(size: C.BuildingSize, parcel: CityParcel): boolean {
+  const def = C.BUILDING_DEFS[size];
+  const slotCount = Math.max(1, parcel.slots.length);
+  const horizontalFrontage = parcel.frontageSide === 'north' || parcel.frontageSide === 'south' || parcel.frontageSide === 'center';
+  const frontageSpan = horizontalFrontage ? parcel.w : parcel.h;
+  const depthSpan = horizontalFrontage ? parcel.h : parcel.w;
+  const maxAlong = frontageSpan / slotCount + (parcel.detail === 'coverage' ? 8 : 14);
+  const maxDepth = depthSpan * (parcel.detail === 'coverage' ? 0.70 : 0.82);
+  const alongSize = horizontalFrontage ? def.w : def.h;
+  const depthSize = horizontalFrontage ? def.h : def.w;
+  return alongSize <= maxAlong && depthSize <= maxDepth;
+}
+
+function fitBuildingPoolForParcel(parcel: CityParcel, pool: readonly C.BuildingSize[]): readonly C.BuildingSize[] {
+  if (parcel.detail === 'core') return pool;
+  const fitted = pool.filter((size) => buildingFitsParcelSlot(size, parcel));
+  if (fitted.length > 0) return fitted;
+  const fallback = [
+    ...parcelProfile(parcel.kind).smallFallbackBuildings,
+    ...SMALL_PARCEL_FALLBACK_BUILDINGS,
+  ].filter((size, index, items) => items.indexOf(size) === index && buildingFitsParcelSlot(size, parcel));
+  return fallback.length > 0 ? fallback : ['shed'];
 }
 
 function furnitureForParcel(kind: CityParcelKind): readonly FurnitureType[] {
-  switch (kind) {
-    case 'shops': return ['shop_awning', 'a_frame_sign', 'noren', 'vending', 'kerbside_vending_pair', 'bicycle_rack'];
-    case 'homes': return ['mailbox', 'post_letter_box', 'wood_fence', 'hedge', 'potted_plant', 'flower_planter_row'];
-    case 'towers': return ['street_lamp', 'bollard', 'guardrail_short', 'atm', 'newspaper_stand'];
-    case 'civic': return ['bench', 'street_lamp', 'flower_bed', 'flag_pole', 'statue'];
-    case 'station': return ['bus_stop', 'taxi_rank_sign', 'bicycle_rack', 'platform_edge', 'railway_track'];
-    case 'construction': return ['traffic_cone', 'guardrail_short', 'sandbags', 'electric_box', 'pallet_stack'];
-    case 'park': return ['bench', 'tree', 'flower_bed', 'street_lamp', 'play_structure'];
-  }
+  return parcelProfile(kind).furniturePool;
 }
 
 function roleForParcel(kind: CityParcelKind, idx: number): PlacementRole {
   if (kind === 'towers') return idx % 3 === 0 ? 'vault' : idx % 3 === 1 ? 'bank' : 'stopper';
-  if (kind === 'construction') return idx % 2 === 0 ? 'stopper' : 'vault';
-  if (kind === 'homes') return idx % 3 === 1 ? 'feeder' : 'bank';
-  if (kind === 'civic' || kind === 'station' || kind === 'park') return idx % 2 === 0 ? 'release' : 'bank';
+  if (kind === 'construction' || kind === 'industrial' || kind === 'harbor' || kind === 'back_alley' || kind === 'rail_edge') return idx % 2 === 0 ? 'stopper' : 'vault';
+  if (kind === 'homes' || kind === 'old_town' || kind === 'mansion_block' || kind === 'bathhouse') return idx % 3 === 1 ? 'feeder' : 'bank';
+  if (kind === 'nightlife' || kind === 'roadside' || kind === 'festival') return idx % 3 === 0 ? 'release' : 'feeder';
+  if (kind === 'school' || kind === 'shrine' || kind === 'civic' || kind === 'station' || kind === 'park' || kind === 'landmark') return idx % 2 === 0 ? 'release' : 'bank';
   return idx % 3 === 1 ? 'feeder' : 'release';
 }
 
@@ -842,10 +1225,12 @@ function frontageSlotsForParcel(parcel: Omit<CityParcel, 'slots' | 'decor'>, cou
   const slots: FrontageSlot[] = [];
   const usableW = Math.max(24, parcel.w - 24);
   const usableH = Math.max(24, parcel.h - 24);
-  const gapCount = Math.max(1, count - 1);
+  const actualCount = parcel.detail === 'accent' ? Math.min(count, 2) : count;
+  const gapCount = Math.max(1, actualCount - 1);
 
-  for (let i = 0; i < count; i++) {
-    const t = count === 1 ? 0.5 : i / gapCount;
+  for (let i = 0; i < actualCount; i++) {
+    const t = actualCount === 1 ? 0.5 : i / gapCount;
+    const looseParcel = parcel.kind === 'homes' || parcel.kind === 'old_town' || parcel.kind === 'school' || parcel.kind === 'shrine';
     let x = parcel.x;
     let y = parcel.y;
     if (parcel.frontageSide === 'north' || parcel.frontageSide === 'south') {
@@ -860,8 +1245,8 @@ function frontageSlotsForParcel(parcel: Omit<CityParcel, 'slots' | 'decor'>, cou
       y,
       pool,
       role: roleForParcel(parcel.kind, i),
-      jitterX: parcel.kind === 'homes' ? 3 : 1.5,
-      jitterY: parcel.kind === 'homes' ? 3 : 1.5,
+      jitterX: looseParcel ? 3 : 1.5,
+      jitterY: looseParcel ? 3 : 1.5,
       decor,
     });
   }
@@ -889,14 +1274,71 @@ function frontageBandForParcel(
   }
 }
 
+function coverageUseDecorForParcel(parcel: Omit<CityParcel, 'slots' | 'decor'>): ParcelDecorPlan[] {
+  const rot = parcel.frontageSide === 'west' || parcel.frontageSide === 'east' ? Math.PI / 2 : 0;
+  const frontage = frontageBandForParcel(parcel, 10, 0.62);
+  const compactW = Math.max(20, parcel.w * 0.56);
+  const compactH = Math.max(12, parcel.h * 0.34);
+  switch (parcel.coverageKind) {
+    case 'yard':
+      return [
+        { decal: 'frontage_pad', x: parcel.x, y: parcel.y, w: Math.max(24, parcel.w * 0.74), h: Math.max(14, parcel.h * 0.42), alpha: 0.44 },
+        { decal: 'planter', x: parcel.x - parcel.w * 0.20, y: parcel.y - parcel.h * 0.08, w: Math.min(24, parcel.w * 0.34), h: Math.min(16, parcel.h * 0.26), alpha: 0.66 },
+        { decal: 'planter', x: parcel.x + parcel.w * 0.22, y: parcel.y + parcel.h * 0.14, w: Math.min(20, parcel.w * 0.28), h: Math.min(13, parcel.h * 0.22), alpha: 0.54 },
+        { decal: 'driveway', x: frontage.x, y: frontage.y, w: Math.max(20, frontage.w * 0.62), h: 8, rot: frontage.rot, alpha: 0.48 },
+        { decal: 'curb_corner', x: parcel.x - parcel.w * 0.36, y: parcel.y + parcel.h * 0.34, w: 10, h: 10, alpha: 0.38 },
+      ];
+    case 'parking':
+      return [
+        { decal: 'frontage_pad', x: parcel.x, y: parcel.y, w: Math.max(28, parcel.w * 0.82), h: Math.max(16, parcel.h * 0.56), alpha: 0.44 },
+        { decal: 'parking_stall', x: parcel.x, y: parcel.y - parcel.h * 0.08, w: Math.max(24, parcel.w * 0.66), h: Math.min(18, compactH), rot, alpha: 0.68 },
+        { decal: 'parking_stall', x: parcel.x + parcel.w * 0.18, y: parcel.y + parcel.h * 0.20, w: Math.max(20, compactW * 0.72), h: 12, rot, alpha: 0.46 },
+        { decal: 'driveway', x: frontage.x, y: frontage.y, w: Math.max(22, frontage.w * 0.68), h: 9, rot: frontage.rot, alpha: 0.56 },
+        { decal: 'curb_corner', x: parcel.x + parcel.w * 0.34, y: parcel.y - parcel.h * 0.34, w: 10, h: 10, rot: Math.PI / 2, alpha: 0.42 },
+      ];
+    case 'workyard':
+      return [
+        { decal: 'frontage_pad', x: parcel.x, y: parcel.y - parcel.h * 0.08, w: Math.max(26, parcel.w * 0.76), h: Math.max(14, parcel.h * 0.36), alpha: 0.30 },
+        { decal: 'danger_stripe', x: parcel.x, y: parcel.y + parcel.h * 0.16, w: Math.max(24, compactW * 1.08), h: 7, rot, alpha: 0.62 },
+        { decal: 'danger_stripe', x: parcel.x - parcel.w * 0.18, y: parcel.y - parcel.h * 0.20, w: Math.max(18, compactW * 0.56), h: 6, rot, alpha: 0.46 },
+        { decal: 'parking_stall', x: parcel.x - parcel.w * 0.12, y: parcel.y - parcel.h * 0.10, w: Math.max(22, parcel.w * 0.48), h: 12, rot, alpha: 0.42 },
+        { decal: 'curb_corner', x: parcel.x + parcel.w * 0.34, y: parcel.y + parcel.h * 0.32, w: 11, h: 11, rot: Math.PI, alpha: 0.42 },
+      ];
+    case 'plaza':
+      return [
+        { decal: 'plaza', x: parcel.x, y: parcel.y, w: Math.max(26, parcel.w * 0.70), h: Math.max(18, parcel.h * 0.52), alpha: 0.56 },
+        { decal: 'frontage_pad', x: frontage.x, y: frontage.y, w: Math.max(22, frontage.w * 0.70), h: 9, rot: frontage.rot, alpha: 0.42 },
+        { decal: 'planter', x: parcel.x + parcel.w * 0.22, y: parcel.y - parcel.h * 0.12, w: Math.min(22, parcel.w * 0.28), h: Math.min(14, parcel.h * 0.24), alpha: 0.62 },
+        { decal: 'planter', x: parcel.x - parcel.w * 0.22, y: parcel.y + parcel.h * 0.14, w: Math.min(20, parcel.w * 0.26), h: Math.min(13, parcel.h * 0.22), alpha: 0.50 },
+        { decal: 'curb_corner', x: parcel.x - parcel.w * 0.34, y: parcel.y - parcel.h * 0.32, w: 10, h: 10, alpha: 0.42 },
+      ];
+    case 'building':
+    case undefined:
+      return [];
+  }
+}
+
 function decorForParcel(parcel: Omit<CityParcel, 'slots' | 'decor'>): ParcelDecorPlan[] {
+  if (parcel.detail === 'coverage' && parcel.coverageKind && parcel.coverageKind !== 'building') {
+    return coverageUseDecorForParcel(parcel);
+  }
+
   const out: ParcelDecorPlan[] = [];
+  const fullDetail = parcel.detail === 'core';
   const northY = parcel.y - parcel.h / 2 + 7;
   const southY = parcel.y + parcel.h / 2 - 7;
   const westX = parcel.x - parcel.w / 2 + 7;
   const eastX = parcel.x + parcel.w / 2 - 7;
-  const padAlpha = parcel.kind === 'park' ? 0.24 : 0.62;
-  const frontage = frontageBandForParcel(parcel, parcel.kind === 'homes' ? 16 : 12, parcel.kind === 'towers' ? 0.72 : 0.82);
+  const padAlpha =
+    parcel.detail === 'coverage' ? 0.34 :
+    parcel.kind === 'park' || parcel.kind === 'shrine' ? 0.24 :
+    0.62;
+  const frontageInset = parcel.kind === 'homes' || parcel.kind === 'old_town' ? 16 : 12;
+  const frontageScale =
+    parcel.kind === 'towers' || parcel.kind === 'industrial' || parcel.kind === 'harbor' ? 0.72 :
+    parcel.kind === 'school' || parcel.kind === 'shrine' ? 0.68 :
+    0.82;
+  const frontage = frontageBandForParcel(parcel, frontageInset, frontageScale);
 
   switch (parcel.frontageSide) {
     case 'north':
@@ -925,20 +1367,39 @@ function decorForParcel(parcel: Omit<CityParcel, 'slots' | 'decor'>): ParcelDeco
       break;
   }
 
-  if (parcel.kind === 'shops') {
-    out.push({ decal: 'facade_row', ...frontage, alpha: 0.92 });
-    out.push({ decal: 'shop_stripe', x: frontage.x, y: frontage.y, w: frontage.w * 0.88, h: 5, rot: frontage.rot, alpha: 0.58 });
-  } else if (parcel.kind === 'towers' || parcel.kind === 'station' || parcel.kind === 'civic') {
-    out.push({ decal: 'facade_row', ...frontage, alpha: parcel.kind === 'station' ? 0.84 : 0.78 });
+  if (parcel.kind === 'shops' || parcel.kind === 'old_town' || parcel.kind === 'nightlife' || parcel.kind === 'festival') {
+    out.push({ decal: 'facade_row', ...frontage, alpha: parcel.detail === 'coverage' ? 0.50 : parcel.detail === 'accent' ? 0.68 : 0.92 });
+    if (fullDetail || parcel.kind === 'festival') {
+      out.push({ decal: 'shop_stripe', x: frontage.x, y: frontage.y, w: frontage.w * 0.88, h: parcel.kind === 'festival' ? 8 : 5, rot: frontage.rot, alpha: parcel.kind === 'old_town' ? 0.42 : 0.58 });
+    }
+  } else if (
+    parcel.kind === 'towers' ||
+    parcel.kind === 'station' ||
+    parcel.kind === 'civic' ||
+    parcel.kind === 'school' ||
+    parcel.kind === 'roadside' ||
+    parcel.kind === 'industrial' ||
+    parcel.kind === 'harbor' ||
+    parcel.kind === 'landmark'
+  ) {
+    out.push({ decal: 'facade_row', ...frontage, alpha: parcel.detail === 'coverage' ? 0.44 : parcel.detail === 'accent' ? 0.58 : parcel.kind === 'station' ? 0.84 : 0.78 });
   }
 
-  if (parcel.kind === 'homes' || parcel.kind === 'park') {
+  if ((parcel.kind === 'homes' || parcel.kind === 'park' || parcel.kind === 'shrine' || parcel.kind === 'school' || parcel.kind === 'old_town') && (fullDetail || parcel.detail === 'infill')) {
     out.push({ decal: 'planter', x: parcel.x - parcel.w * 0.28, y: parcel.y, w: Math.min(34, parcel.w * 0.22), h: Math.min(20, parcel.h * 0.24), alpha: 0.70 });
     out.push({ decal: 'planter', x: parcel.x + parcel.w * 0.28, y: parcel.y + parcel.h * 0.18, w: Math.min(30, parcel.w * 0.20), h: Math.min(18, parcel.h * 0.22), alpha: 0.56 });
-  } else if (parcel.kind === 'towers' || parcel.kind === 'station') {
+  } else if ((parcel.kind === 'towers' || parcel.kind === 'station' || parcel.kind === 'roadside' || parcel.kind === 'nightlife') && fullDetail) {
     out.push({ decal: 'parking_stall', x: parcel.x, y: parcel.y + parcel.h * 0.22, w: Math.min(116, parcel.w * 0.70), h: 16, alpha: 0.38 });
-  } else if (parcel.kind === 'construction') {
+  } else if ((parcel.kind === 'construction' || parcel.kind === 'industrial' || parcel.kind === 'harbor') && fullDetail) {
     out.push({ decal: 'danger_stripe', x: parcel.x, y: parcel.y + parcel.h * 0.24, w: Math.min(124, parcel.w * 0.76), h: 8, alpha: 0.42 });
+  }
+
+  if ((parcel.kind === 'festival' || parcel.kind === 'landmark') && (fullDetail || parcel.detail === 'infill')) {
+    out.push({ decal: 'plaza', x: parcel.x, y: parcel.y, w: parcel.w * 0.64, h: parcel.h * 0.46, alpha: 0.34 });
+  } else if (parcel.kind === 'shrine' && fullDetail) {
+    out.push({ decal: 'driveway', x: parcel.x, y: parcel.y, w: parcel.w * 0.48, h: 11, rot: frontage.rot, alpha: 0.44 });
+  } else if (parcel.kind === 'roadside' && fullDetail) {
+    out.push({ decal: 'parking_stall', x: parcel.x, y: parcel.y - parcel.h * 0.18, w: Math.min(96, parcel.w * 0.62), h: 18, alpha: 0.42 });
   }
   return out;
 }
@@ -952,8 +1413,11 @@ function makeParcel(
   w: number,
   h: number,
   slots: number,
+  detail: CityParcelDetail = 'core',
+  coverageKind?: CoverageCellKind,
+  roadAffinity?: CoverageRoadAffinity,
 ): CityParcel {
-  const base = { id, kind, frontageSide, x, y, w, h };
+  const base = { id, kind, detail, frontageSide, coverageKind, roadAffinity, x, y, w, h };
   return {
     ...base,
     slots: frontageSlotsForParcel(base, slots),
@@ -961,8 +1425,360 @@ function makeParcel(
   };
 }
 
+function parcelBounds(parcel: Pick<CityParcel, 'x' | 'y' | 'w' | 'h'>): Rect {
+  return { x: parcel.x - parcel.w / 2, y: parcel.y - parcel.h / 2, w: parcel.w, h: parcel.h };
+}
+
+function parcelOverlapsExisting(parcel: CityParcel, parcels: readonly CityParcel[]): boolean {
+  const bounds = parcelBounds(parcel);
+  const area = Math.max(1, bounds.w * bounds.h);
+  return parcels.some((existing) => rectOverlapArea(bounds, parcelBounds(existing)) / area > 0.22);
+}
+
 function frontageTowardRoad(parcelX: number, roadX: number): FrontageSide {
   return parcelX < roadX ? 'east' : 'west';
+}
+
+function accentKindsForTemplate(templateId: CityBlockTemplateId, blockIdx: number): CityParcelKind[] {
+  const regular: Record<CityBlockTemplateId, readonly CityParcelKind[]> = {
+    shopping_street: ['shops', 'old_town', 'back_alley', 'bathhouse', 'homes'],
+    residential_lane: ['homes', 'mansion_block', 'school', 'park', 'back_alley', 'shops'],
+    downtown_crossing: ['towers', 'roadside', 'shops', 'civic', 'rail_edge', 'back_alley'],
+    civic_plaza: ['civic', 'park', 'school', 'bathhouse', 'shops'],
+    station_front: ['station', 'rail_edge', 'roadside', 'shops', 'homes', 'back_alley'],
+    construction_edge: ['construction', 'industrial', 'back_alley', 'roadside', 'towers', 'rail_edge'],
+  };
+  const landmark: Record<CityBlockTemplateId, readonly CityParcelKind[]> = {
+    shopping_street: ['festival', 'shrine', 'bathhouse', 'landmark'],
+    residential_lane: ['shrine', 'old_town', 'mansion_block', 'landmark'],
+    downtown_crossing: ['nightlife', 'landmark', 'industrial', 'rail_edge'],
+    civic_plaza: ['landmark', 'shrine', 'bathhouse', 'festival'],
+    station_front: ['nightlife', 'landmark', 'old_town', 'rail_edge'],
+    construction_edge: ['harbor', 'landmark', 'old_town', 'back_alley'],
+  };
+  const cycle = regular[templateId];
+  const phase = positiveMod(blockIdx * 2 + templateId.length, cycle.length);
+  const out = [
+    cycle[phase],
+    cycle[(phase + 1) % cycle.length],
+    cycle[(phase + 2) % cycle.length],
+  ];
+  if (positiveMod(blockIdx + templateId.length, 5) === 0) {
+    const special = landmark[templateId];
+    out[2] = special[positiveMod(blockIdx, special.length)];
+  }
+  return out;
+}
+
+function accentParcelProfile(kind: CityParcelKind): { w: number; h: number; slots: number; offset: number } {
+  switch (kind) {
+    case 'school': return { w: 126, h: 74, slots: 2, offset: 146 };
+    case 'shrine': return { w: 104, h: 82, slots: 2, offset: 146 };
+    case 'old_town': return { w: 104, h: 72, slots: 2, offset: 142 };
+    case 'mansion_block': return { w: 112, h: 74, slots: 2, offset: 146 };
+    case 'back_alley': return { w: 96, h: 58, slots: 2, offset: 136 };
+    case 'rail_edge': return { w: 126, h: 58, slots: 2, offset: 146 };
+    case 'bathhouse': return { w: 108, h: 72, slots: 2, offset: 144 };
+    case 'nightlife': return { w: 104, h: 70, slots: 2, offset: 142 };
+    case 'roadside': return { w: 104, h: 62, slots: 2, offset: 140 };
+    case 'industrial': return { w: 130, h: 78, slots: 1, offset: 152 };
+    case 'harbor': return { w: 132, h: 78, slots: 1, offset: 154 };
+    case 'festival': return { w: 126, h: 78, slots: 2, offset: 148 };
+    case 'landmark': return { w: 108, h: 74, slots: 1, offset: 144 };
+    case 'shops': return { w: 78, h: 58, slots: 2, offset: 132 };
+    case 'homes': return { w: 78, h: 64, slots: 2, offset: 132 };
+    case 'towers': return { w: 92, h: 58, slots: 1, offset: 136 };
+    case 'civic': return { w: 82, h: 50, slots: 1, offset: 132 };
+    case 'station': return { w: 92, h: 54, slots: 1, offset: 136 };
+    case 'park': return { w: 86, h: 72, slots: 1, offset: 140 };
+    case 'construction': return { w: 82, h: 58, slots: 1, offset: 134 };
+  }
+}
+
+function subtractRect(source: Rect, blocker: Rect): Rect[] {
+  const ix1 = Math.max(source.x, blocker.x);
+  const iy1 = Math.max(source.y, blocker.y);
+  const ix2 = Math.min(source.x + source.w, blocker.x + blocker.w);
+  const iy2 = Math.min(source.y + source.h, blocker.y + blocker.h);
+  if (ix2 <= ix1 || iy2 <= iy1) return [source];
+
+  const out: Rect[] = [];
+  const topH = iy1 - source.y;
+  const bottomH = source.y + source.h - iy2;
+  const leftW = ix1 - source.x;
+  const rightW = source.x + source.w - ix2;
+
+  if (topH > 0) out.push({ x: source.x, y: source.y, w: source.w, h: topH });
+  if (bottomH > 0) out.push({ x: source.x, y: iy2, w: source.w, h: bottomH });
+  if (leftW > 0) out.push({ x: source.x, y: iy1, w: leftW, h: iy2 - iy1 });
+  if (rightW > 0) out.push({ x: ix2, y: iy1, w: rightW, h: iy2 - iy1 });
+  return out.filter((rect) => rect.w >= 28 && rect.h >= 28);
+}
+
+function subtractRects(sources: Rect[], blockers: readonly Rect[]): Rect[] {
+  let rects = sources;
+  for (const blocker of blockers) {
+    const next: Rect[] = [];
+    for (const rect of rects) next.push(...subtractRect(rect, blocker));
+    rects = next;
+  }
+  return rects;
+}
+
+function clampRectToBand(rect: Rect, baseY: number, bandHeight: number): Rect | null {
+  const x1 = Math.max(C.WORLD_MIN_X + 8, rect.x);
+  const y1 = Math.max(baseY + 6, rect.y);
+  const x2 = Math.min(C.WORLD_MAX_X - 8, rect.x + rect.w);
+  const y2 = Math.min(baseY + bandHeight - 6, rect.y + rect.h);
+  const w = x2 - x1;
+  const h = y2 - y1;
+  return w >= 34 && h >= 34 ? { x: x1, y: y1, w, h } : null;
+}
+
+function coverageKindsForTemplate(templateId: CityBlockTemplateId): readonly CityParcelKind[] {
+  switch (templateId) {
+    case 'shopping_street':
+      return ['shops', 'old_town', 'homes', 'bathhouse', 'back_alley', 'park', 'roadside', 'shops'];
+    case 'residential_lane':
+      return ['homes', 'mansion_block', 'park', 'school', 'shops', 'bathhouse', 'back_alley'];
+    case 'downtown_crossing':
+      return ['towers', 'shops', 'civic', 'rail_edge', 'park', 'old_town', 'back_alley', 'roadside'];
+    case 'civic_plaza':
+      return ['civic', 'park', 'bathhouse', 'school', 'shops', 'mansion_block'];
+    case 'station_front':
+      return ['station', 'rail_edge', 'shops', 'mansion_block', 'bathhouse', 'park', 'back_alley', 'roadside'];
+    case 'construction_edge':
+      return ['construction', 'industrial', 'shops', 'back_alley', 'mansion_block', 'rail_edge', 'roadside', 'park'];
+  }
+}
+
+function contrastingCoverageKind(
+  kinds: readonly CityParcelKind[],
+  preferredIndex: number,
+  previousKind: CityParcelKind | undefined,
+  previousSideKind: CityParcelKind | undefined,
+): CityParcelKind {
+  const previousFamily = previousKind ? parcelColorFamily(previousKind) : undefined;
+  const previousSideFamily = previousSideKind ? parcelColorFamily(previousSideKind) : undefined;
+  for (let i = 0; i < kinds.length; i++) {
+    const candidate = kinds[positiveMod(preferredIndex + i, kinds.length)];
+    const family = parcelColorFamily(candidate);
+    if (family !== previousFamily && family !== previousSideFamily) return candidate;
+  }
+  return kinds[positiveMod(preferredIndex, kinds.length)];
+}
+
+function fallbackCoverageUseKind(kind: CityParcelKind, phase: number): Exclude<CoverageCellKind, 'building'> {
+  switch (kind) {
+    case 'construction':
+    case 'industrial':
+    case 'harbor':
+    case 'back_alley':
+      return 'workyard';
+    case 'towers':
+    case 'civic':
+    case 'station':
+    case 'roadside':
+    case 'rail_edge':
+      return 'parking';
+    case 'park':
+    case 'shrine':
+    case 'festival':
+    case 'landmark':
+    case 'bathhouse':
+      return phase % 2 === 0 ? 'plaza' : 'yard';
+    case 'school':
+    case 'homes':
+    case 'mansion_block':
+    case 'old_town':
+      return 'yard';
+    case 'shops':
+    case 'nightlife':
+      return phase % 2 === 0 ? 'parking' : 'yard';
+  }
+}
+
+function roadAffinityForCoverageCell(street: StreetLayout, cx: number, cy: number): CoverageRoadAffinity {
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let bestRole: StreetRoadRole | null = null;
+  for (const road of street.roads) {
+    const left = road.x - road.w / 2;
+    const right = road.x + road.w / 2;
+    const top = road.y - road.h / 2;
+    const bottom = road.y + road.h / 2;
+    const dx = cx < left ? left - cx : cx > right ? cx - right : 0;
+    const dy = cy < top ? top - cy : cy > bottom ? cy - bottom : 0;
+    const distance = Math.hypot(dx, dy);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestRole = road.role;
+    }
+  }
+  if (bestDistance > 86 || !bestRole) return 'open';
+  if (bestRole === 'main') return 'main';
+  if (bestRole === 'alley') return 'alley';
+  return 'side';
+}
+
+function coverageCellKindFor(
+  kind: CityParcelKind,
+  roadAffinity: CoverageRoadAffinity,
+  index: number,
+  rect: Rect,
+): CoverageCellKind {
+  const phase = positiveMod(index * 7 + kind.length * 3 + Math.round(rect.w + rect.h), 10);
+  const profile = parcelProfile(kind);
+  const allowed = profile.allowedCoverageUses;
+  const supportUses = allowed.filter((use) => use !== 'building');
+  const fallbackUse = supportUses[positiveMod(phase, Math.max(1, supportUses.length))] ?? fallbackCoverageUseKind(kind, phase);
+  const hasBuildingRoom = rect.w >= 46 && rect.h >= 38;
+  if (!hasBuildingRoom || !allowed.includes('building')) return fallbackUse;
+
+  if (roadAffinity === 'alley' && phase < 6) return 'building';
+  if (roadAffinity === 'main' && phase < 5) return 'building';
+  if (roadAffinity === 'side' && phase < 6) return 'building';
+  if (phase < 4) return 'building';
+  return fallbackUse;
+}
+
+function coverageCellFromRect(
+  street: StreetLayout,
+  rect: Rect,
+  kind: CityParcelKind,
+  index: number,
+): CoverageCell | null {
+  const trimmed: Rect = {
+    x: rect.x + 3,
+    y: rect.y + 3,
+    w: rect.w - 6,
+    h: rect.h - 6,
+  };
+  if (trimmed.w < 30 || trimmed.h < 30) return null;
+
+  const cx = trimmed.x + trimmed.w / 2;
+  const cy = trimmed.y + trimmed.h / 2;
+  const roadX = roadXAtY(street.graph, cy);
+  const roadAffinity = roadAffinityForCoverageCell(street, cx, cy);
+  const cellKind = coverageCellKindFor(kind, roadAffinity, index, trimmed);
+  return {
+    x: cx,
+    y: cy,
+    w: trimmed.w,
+    h: trimmed.h,
+    kind: cellKind,
+    parcelKind: kind,
+    frontageSide: frontageTowardRoad(cx, roadX),
+    roadAffinity,
+    index,
+  };
+}
+
+function splitCoverageRectIntoCells(rect: Rect): Rect[] {
+  if (rect.w < 154 && rect.h < 124) return [rect];
+
+  const area = rect.w * rect.h;
+  const splitAlongX = rect.w >= rect.h * 1.15;
+  const targetCount =
+    area > 36000 ? 3 :
+    area > 21000 ? 2 :
+    1;
+  const cols = splitAlongX ? targetCount : 1;
+  const rows = splitAlongX ? 1 : targetCount;
+  const cells: Rect[] = [];
+  const cellW = rect.w / cols;
+  const cellH = rect.h / rows;
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      cells.push({
+        x: rect.x + col * cellW,
+        y: rect.y + row * cellH,
+        w: cellW,
+        h: cellH,
+      });
+    }
+  }
+  return cells;
+}
+
+function coverageSlotCount(kind: CityParcelKind, rect: Rect, cellKind: CoverageCellKind = 'building'): number {
+  if (cellKind !== 'building') return 0;
+  const longSide = Math.max(rect.w, rect.h);
+  const base =
+    kind === 'industrial' || kind === 'harbor' || kind === 'landmark' || kind === 'park' ? 1 :
+    kind === 'back_alley' || kind === 'rail_edge' ? 1 :
+    kind === 'towers' || kind === 'civic' || kind === 'station' || kind === 'roadside' || kind === 'mansion_block' || kind === 'bathhouse' ? 2 :
+    Math.floor(longSide / 42);
+  return Math.max(1, Math.min(2, base));
+}
+
+function coverageParcelsForStreet(
+  street: StreetLayout,
+  baseY: number,
+  bandHeight: number,
+  blockIdx: number,
+  templateId: CityBlockTemplateId,
+  existing: readonly CityParcel[],
+): CityParcel[] {
+  const world: Rect = {
+    x: C.WORLD_MIN_X + 8,
+    y: baseY + 6,
+    w: C.WORLD_MAX_X - C.WORLD_MIN_X - 16,
+    h: bandHeight - 12,
+  };
+  const roadZones = roadEnvelopeRects(street)
+    .map((zone) => clampRectToBand(zone, baseY, bandHeight))
+    .filter((zone): zone is Rect => Boolean(zone));
+  const blockers = [
+    ...roadZones,
+    ...existing.map((parcel) => {
+      const bounds = parcelBounds(parcel);
+      return { x: bounds.x - 3, y: bounds.y - 3, w: bounds.w + 6, h: bounds.h + 6 };
+    }),
+  ];
+  const freeRects = subtractRects([world], blockers)
+    .map((rect) => clampRectToBand(rect, baseY, bandHeight))
+    .filter((rect): rect is Rect => Boolean(rect))
+    .filter((rect) => rect.w >= 28 && rect.h >= 28);
+  const kinds = coverageKindsForTemplate(templateId);
+  const parcels: CityParcel[] = [];
+  let coverageIdx = 0;
+  const lastKindBySide: Partial<Record<'left' | 'right', CityParcelKind>> = {};
+
+  const addCoverageCell = (cellRect: Rect) => {
+    const cx = cellRect.x + cellRect.w / 2;
+    const cy = cellRect.y + cellRect.h / 2;
+    const roadX = roadXAtY(street.graph, cy);
+    const sideBias = cx < roadX ? 0 : 3;
+    const sideKey = cx < roadX ? 'left' : 'right';
+    const preferredIndex = positiveMod(blockIdx * 5 + coverageIdx * 2 + sideBias, kinds.length);
+    const kind = contrastingCoverageKind(kinds, preferredIndex, parcels[parcels.length - 1]?.kind, lastKindBySide[sideKey]);
+    const cell = coverageCellFromRect(street, cellRect, kind, coverageIdx);
+    if (!cell) return;
+    const parcel = makeParcel(
+      `coverage-${coverageIdx}-${cell.kind}-${kind}`,
+      cell.parcelKind,
+      cell.frontageSide,
+      cell.x,
+      cell.y,
+      cell.w,
+      cell.h,
+      coverageSlotCount(cell.parcelKind, cell, cell.kind),
+      'coverage',
+      cell.kind,
+      cell.roadAffinity,
+    );
+    coverageIdx += 1;
+    if (!parcelOverlapsExisting(parcel, [...existing, ...parcels])) {
+      parcels.push(parcel);
+      lastKindBySide[sideKey] = cell.parcelKind;
+    }
+  };
+
+  for (const rect of freeRects) {
+    for (const cell of splitCoverageRectIntoCells(rect)) addCoverageCell(cell);
+  }
+
+  return parcels;
 }
 
 function cityParcelsForTemplate(baseY: number, bandHeight: number, blockIdx: number, templateId: CityBlockTemplateId): CityParcel[] {
@@ -975,6 +1791,31 @@ function cityParcelsForTemplate(baseY: number, bandHeight: number, blockIdx: num
   const streetX = (yy: number, offset: number, halfW = 42) => px(roadAt(yy) + offset, halfW);
   const streetFrontage = (xx: number, yy: number) => frontageTowardRoad(xx, roadAt(yy));
   const parcels: CityParcel[] = [];
+  const accentKinds = accentKindsForTemplate(templateId, blockIdx);
+  const addInfillParcel = (
+    id: string,
+    kind: CityParcelKind,
+    ratio: number,
+    side: -1 | 1,
+    w: number,
+    h: number,
+    slots: number,
+    offset = 126,
+  ) => {
+    const yy = y(ratio);
+    const xx = streetX(yy, side * offset * 0.76, w / 2);
+    const parcel = makeParcel(id, kind, streetFrontage(xx, yy), xx, yy, w, h, slots, 'infill');
+    if (!parcelOverlapsExisting(parcel, parcels)) parcels.push(parcel);
+  };
+  const addAccentParcel = (idx: number, ratio: number, sideHint?: -1 | 1) => {
+    const kind = accentKinds[idx % accentKinds.length];
+    const profile = accentParcelProfile(kind);
+    const yy = y(ratio);
+    const side = sideHint ?? ((idx % 2 === 0 ? sideFor(yy) : -sideFor(yy)) as -1 | 1);
+    const xx = streetX(yy, side * profile.offset * 0.78, profile.w / 2);
+    const parcel = makeParcel(`accent-${idx}-${kind}`, kind, streetFrontage(xx, yy), xx, yy, profile.w, profile.h, profile.slots, 'accent');
+    if (!parcelOverlapsExisting(parcel, parcels)) parcels.push(parcel);
+  };
 
   switch (templateId) {
     case 'shopping_street': {
@@ -1068,6 +1909,52 @@ function cityParcelsForTemplate(baseY: number, bandHeight: number, blockIdx: num
       break;
     }
   }
+
+  switch (templateId) {
+    case 'shopping_street':
+      addInfillParcel('infill-shop-north', 'shops', 0.18, -1, 76, 58, 2, 132);
+      addInfillParcel('infill-shop-south', 'shops', 0.84, 1, 78, 58, 2, 132);
+      addInfillParcel('infill-back-alley', 'back_alley', 0.54, -sideFor(y(0.54)) as -1 | 1, 76, 60, 1, 142);
+      addAccentParcel(0, 0.30, sideFor(y(0.30)) as -1 | 1);
+      addAccentParcel(1, 0.72, -sideFor(y(0.72)) as -1 | 1);
+      break;
+    case 'residential_lane':
+      addInfillParcel('infill-mansion-upper', 'mansion_block', 0.16, 1, 86, 66, 2, 136);
+      addInfillParcel('infill-homes-lower', 'homes', 0.84, -1, 80, 66, 2, 132);
+      addInfillParcel('infill-corner-shop', 'shops', 0.50, sideFor(y(0.50)) as -1 | 1, 70, 52, 1, 138);
+      addAccentParcel(0, 0.42, -sideFor(y(0.42)) as -1 | 1);
+      addAccentParcel(1, 0.72, sideFor(y(0.72)) as -1 | 1);
+      break;
+    case 'downtown_crossing':
+      addInfillParcel('infill-office-upper', 'towers', 0.18, sideFor(y(0.18)) as -1 | 1, 88, 56, 1, 132);
+      addInfillParcel('infill-rail-edge', 'rail_edge', 0.82, -sideFor(y(0.82)) as -1 | 1, 96, 56, 1, 136);
+      addInfillParcel('infill-retail-block', 'shops', 0.50, sideFor(y(0.50)) as -1 | 1, 74, 58, 2, 142);
+      addAccentParcel(0, 0.30, -sideFor(y(0.30)) as -1 | 1);
+      addAccentParcel(1, 0.68, sideFor(y(0.68)) as -1 | 1);
+      break;
+    case 'civic_plaza':
+      addInfillParcel('infill-civic-edge', 'civic', 0.18, sideFor(y(0.18)) as -1 | 1, 82, 50, 1, 132);
+      addInfillParcel('infill-bathhouse-edge', 'bathhouse', 0.70, -sideFor(y(0.70)) as -1 | 1, 88, 58, 2, 140);
+      addInfillParcel('infill-civic-homes', 'homes', 0.88, sideFor(y(0.88)) as -1 | 1, 74, 54, 1, 138);
+      addAccentParcel(0, 0.34, sideFor(y(0.34)) as -1 | 1);
+      addAccentParcel(1, 0.62, -sideFor(y(0.62)) as -1 | 1);
+      break;
+    case 'station_front':
+      addInfillParcel('infill-rail-service', 'rail_edge', 0.18, -sideFor(y(0.18)) as -1 | 1, 96, 54, 1, 136);
+      addInfillParcel('infill-station-retail', 'shops', 0.56, sideFor(y(0.56)) as -1 | 1, 78, 58, 2, 142);
+      addInfillParcel('infill-station-homes', 'homes', 0.86, -sideFor(y(0.86)) as -1 | 1, 76, 58, 1, 138);
+      addAccentParcel(0, 0.34, sideFor(y(0.34)) as -1 | 1);
+      addAccentParcel(1, 0.72, -sideFor(y(0.72)) as -1 | 1);
+      break;
+    case 'construction_edge':
+      addInfillParcel('infill-yard-office', 'construction', 0.38, sideFor(y(0.38)) as -1 | 1, 82, 58, 1, 134);
+      addInfillParcel('infill-service-alley', 'back_alley', 0.82, -sideFor(y(0.82)) as -1 | 1, 92, 58, 1, 138);
+      addInfillParcel('infill-site-rail', 'rail_edge', 0.16, -sideFor(y(0.16)) as -1 | 1, 86, 52, 1, 136);
+      addAccentParcel(0, 0.56, -sideFor(y(0.56)) as -1 | 1);
+      addAccentParcel(1, 0.76, sideFor(y(0.76)) as -1 | 1);
+      break;
+  }
+  parcels.push(...coverageParcelsForStreet(street, baseY, bandHeight, blockIdx, templateId, parcels));
   return parcels;
 }
 
@@ -1171,22 +2058,12 @@ function createLayout(
 
 function parcelGroundType(parcel: CityParcel, templateId: CityBlockTemplateId, blockIdx: number): GroundTile['type'] {
   const variant = positiveMod(blockIdx + parcel.id.length, 4);
-  switch (parcel.kind) {
-    case 'shops':
-      return variant % 2 === 0 ? 'tile' : 'stone_pavement';
-    case 'homes':
-      return 'residential_tile';
-    case 'towers':
-      return variant % 2 === 0 ? 'concrete' : 'tile';
-    case 'civic':
-      return templateId === 'civic_plaza' ? 'stone_pavement' : 'concrete';
-    case 'station':
-      return variant % 2 === 0 ? 'tile' : 'concrete';
-    case 'construction':
-      return variant % 2 === 0 ? 'gravel' : 'steel_plate';
-    case 'park':
-      return 'grass';
-  }
+  void templateId;
+  const profile = parcelProfile(parcel.kind);
+  const palette = profile.groundPalette;
+  if (parcel.detail === 'accent' && palette.accent) return palette.accent;
+  if (profile.specialMaterialPolicy === 'standard' && palette.accent && variant === 0) return palette.accent;
+  return palette.base;
 }
 
 function frontageGroundTile(parcel: CityParcel, type: GroundTile['type'], depth: number, lengthScale = 0.86): GroundTile {
@@ -1204,11 +2081,118 @@ function frontageGroundTile(parcel: CityParcel, type: GroundTile['type'], depth:
   }
 }
 
+function coverageGroundBase(kind: CityParcelKind, fallback: GroundTile['type']): GroundTile['type'] {
+  return parcelProfile(kind).groundPalette.coverageBase ?? fallback;
+}
+
+function coverageFrontageGround(kind: CityParcelKind, fallback: GroundTile['type']): GroundTile['type'] {
+  return parcelProfile(kind).groundPalette.coverageFrontage ?? fallback;
+}
+
 function parcelGroundLayers(parcel: CityParcel, templateId: CityBlockTemplateId, blockIdx: number): GroundTile[] {
   const base = parcelGroundType(parcel, templateId, blockIdx);
+  const profile = parcelProfile(parcel.kind);
+  const palette = profile.groundPalette;
   const layers: GroundTile[] = [
     { type: base, x: parcel.x, y: parcel.y, w: parcel.w, h: parcel.h },
   ];
+
+  if (parcel.detail === 'coverage') {
+    if (parcel.coverageKind && parcel.coverageKind !== 'building') {
+      switch (parcel.coverageKind) {
+        case 'yard':
+          layers[0] = { type: palette.coverageBase, x: parcel.x, y: parcel.y, w: parcel.w, h: parcel.h };
+          layers.push(frontageGroundTile(parcel, palette.coverageFrontage, Math.min(18, Math.max(12, parcel.h * 0.30)), 0.66));
+          {
+            const yardPad =
+              parcel.kind === 'shops' || parcel.kind === 'old_town' || parcel.kind === 'bathhouse' ? 'stone_pavement' :
+              parcel.kind === 'back_alley' ? 'concrete' :
+              parcel.kind === 'rail_edge' ? 'city_block' :
+              'grass';
+            const yardInset =
+              parcel.kind === 'homes' || parcel.kind === 'mansion_block' || parcel.kind === 'park' || parcel.kind === 'school' || parcel.kind === 'bathhouse' ? 'dirt' :
+              parcel.kind === 'back_alley' ? 'oil_stained_concrete' :
+              palette.base;
+            layers.push({ type: yardPad, x: parcel.x + parcel.w * 0.22, y: parcel.y + parcel.h * 0.12, w: parcel.w * 0.28, h: parcel.h * 0.28 });
+            layers.push({ type: yardInset, x: parcel.x - parcel.w * 0.18, y: parcel.y - parcel.h * 0.12, w: parcel.w * 0.24, h: parcel.h * 0.20 });
+          }
+          return layers;
+        case 'parking':
+          layers[0] = { type: 'concrete', x: parcel.x, y: parcel.y, w: parcel.w, h: parcel.h };
+          layers.push({
+            type:
+              parcel.kind === 'roadside' || parcel.kind === 'back_alley' ? 'oil_stained_concrete' :
+              parcel.kind === 'rail_edge' ? 'steel_plate' :
+              'city_block',
+            x: parcel.x,
+            y: parcel.y,
+            w: parcel.w * 0.74,
+            h: parcel.h * 0.58,
+          });
+          layers.push({ type: palette.coverageFrontage, x: parcel.x, y: parcel.y - parcel.h * 0.24, w: parcel.w * 0.72, h: Math.max(10, parcel.h * 0.18) });
+          return layers;
+        case 'workyard':
+          layers[0] = { type: palette.coverageBase, x: parcel.x, y: parcel.y, w: parcel.w, h: parcel.h };
+          layers.push({ type: 'gravel', x: parcel.x + parcel.w * 0.10, y: parcel.y - parcel.h * 0.10, w: parcel.w * 0.54, h: parcel.h * 0.36 });
+          layers.push({ type: 'concrete', x: parcel.x - parcel.w * 0.18, y: parcel.y + parcel.h * 0.12, w: parcel.w * 0.36, h: parcel.h * 0.26 });
+          if (profile.specialMaterialPolicy === 'restricted') {
+            layers.push({ type: 'hazard_stripe', x: parcel.x + parcel.w * 0.18, y: parcel.y + parcel.h * 0.18, w: parcel.w * 0.42, h: Math.min(10, parcel.h * 0.22) });
+          }
+          return layers;
+        case 'plaza':
+          layers[0] = { type: palette.coverageBase === 'grass' ? 'stone_pavement' : palette.coverageBase, x: parcel.x, y: parcel.y, w: parcel.w, h: parcel.h };
+          layers.push({ type: parcel.kind === 'landmark' ? 'checker_tile' : palette.coverageFrontage, x: parcel.x, y: parcel.y, w: parcel.w * 0.58, h: parcel.h * 0.42 });
+          layers.push({ type: 'grass', x: parcel.x - parcel.w * 0.26, y: parcel.y + parcel.h * 0.18, w: parcel.w * 0.22, h: parcel.h * 0.24 });
+          return layers;
+      }
+    }
+
+    const coverageBase = coverageGroundBase(parcel.kind, base);
+    const frontageType = coverageFrontageGround(parcel.kind, base);
+    layers[0] = { type: coverageBase, x: parcel.x, y: parcel.y, w: parcel.w, h: parcel.h };
+    layers.push(frontageGroundTile(parcel, frontageType, Math.min(26, Math.max(18, parcel.h * 0.28)), 0.78));
+
+    if (parcel.kind === 'homes' || parcel.kind === 'mansion_block') {
+      layers.push({ type: 'grass', x: parcel.x + parcel.w * 0.24, y: parcel.y + parcel.h * 0.12, w: parcel.w * 0.28, h: parcel.h * 0.26 });
+    } else if (parcel.kind === 'park' || parcel.kind === 'school') {
+      layers.push({ type: 'stone_pavement', x: parcel.x, y: parcel.y, w: parcel.w * 0.56, h: 14 });
+    } else if (parcel.kind === 'shrine') {
+      layers.push({ type: 'stone_pavement', x: parcel.x, y: parcel.y, w: parcel.w * 0.38, h: parcel.h * 0.46 });
+    } else if (parcel.kind === 'industrial' || parcel.kind === 'harbor' || parcel.kind === 'construction') {
+      layers.push({ type: 'hazard_stripe', x: parcel.x - parcel.w * 0.20, y: parcel.y + parcel.h * 0.18, w: parcel.w * 0.26, h: 10 });
+    } else if (parcel.kind === 'roadside' || parcel.kind === 'station') {
+      layers.push({ type: parcel.kind === 'roadside' ? 'oil_stained_concrete' : 'concrete', x: parcel.x, y: parcel.y + parcel.h * 0.18, w: parcel.w * 0.58, h: parcel.h * 0.30 });
+    } else if (parcel.kind === 'old_town') {
+      layers.push({ type: 'stone_pavement', x: parcel.x, y: parcel.y + parcel.h * 0.10, w: parcel.w * 0.48, h: parcel.h * 0.26 });
+    } else if (parcel.kind === 'bathhouse') {
+      layers.push({ type: 'fallen_leaves', x: parcel.x + parcel.w * 0.18, y: parcel.y + parcel.h * 0.12, w: parcel.w * 0.30, h: parcel.h * 0.24 });
+      layers.push({ type: 'moss', x: parcel.x - parcel.w * 0.22, y: parcel.y - parcel.h * 0.10, w: parcel.w * 0.24, h: parcel.h * 0.22 });
+    } else if (parcel.kind === 'back_alley') {
+      layers.push({ type: 'oil_stained_concrete', x: parcel.x, y: parcel.y + parcel.h * 0.16, w: parcel.w * 0.54, h: parcel.h * 0.28 });
+    } else if (parcel.kind === 'rail_edge') {
+      layers.push({ type: 'steel_plate', x: parcel.x, y: parcel.y + parcel.h * 0.10, w: parcel.w * 0.58, h: parcel.h * 0.24 });
+    } else if (parcel.kind === 'landmark') {
+      layers.push({ type: 'checker_tile', x: parcel.x, y: parcel.y, w: parcel.w * 0.42, h: parcel.h * 0.30 });
+    } else if (parcel.kind === 'civic') {
+      layers.push({ type: 'stone_pavement', x: parcel.x, y: parcel.y, w: parcel.w * 0.42, h: parcel.h * 0.30 });
+    }
+    return layers;
+  }
+
+  if (parcel.detail === 'accent') {
+    const frontageType: GroundTile['type'] =
+      parcel.kind === 'festival' && palette.accent ? palette.accent :
+      palette.frontage;
+    layers.push(frontageGroundTile(parcel, frontageType, 22, 0.70));
+    if (parcel.kind === 'industrial' || parcel.kind === 'harbor' || parcel.kind === 'rail_edge') {
+      layers.push({ type: 'hazard_stripe', x: parcel.x - parcel.w * 0.22, y: parcel.y + parcel.h * 0.18, w: parcel.w * 0.24, h: 12 });
+    } else if (parcel.kind === 'school' || parcel.kind === 'shrine' || parcel.kind === 'landmark' || parcel.kind === 'mansion_block' || parcel.kind === 'bathhouse') {
+      layers.push({ type: 'grass', x: parcel.x + parcel.w * 0.24, y: parcel.y + parcel.h * 0.14, w: parcel.w * 0.24, h: parcel.h * 0.24 });
+    } else if (parcel.kind === 'back_alley') {
+      layers.push({ type: 'oil_stained_concrete', x: parcel.x, y: parcel.y + parcel.h * 0.18, w: parcel.w * 0.48, h: parcel.h * 0.24 });
+    }
+    return layers;
+  }
 
   switch (parcel.kind) {
     case 'shops':
@@ -1229,7 +2213,7 @@ function parcelGroundLayers(parcel: CityParcel, templateId: CityBlockTemplateId,
       layers.push({ type: 'grass', x: parcel.x - parcel.w * 0.25, y: parcel.y + parcel.h * 0.08, w: parcel.w * 0.26, h: parcel.h * 0.42 });
       break;
     case 'station':
-      layers.push(frontageGroundTile(parcel, 'checker_tile', 34, 0.84));
+      layers.push(frontageGroundTile(parcel, 'tile', 34, 0.84));
       layers.push({ type: 'concrete', x: parcel.x, y: parcel.y + parcel.h * 0.18, w: parcel.w * 0.70, h: parcel.h * 0.34 });
       break;
     case 'park':
@@ -1240,6 +2224,73 @@ function parcelGroundLayers(parcel: CityParcel, templateId: CityBlockTemplateId,
     case 'construction':
       layers.push(frontageGroundTile(parcel, 'steel_plate', 30, 0.82));
       layers.push({ type: 'gravel', x: parcel.x, y: parcel.y + parcel.h * 0.18, w: parcel.w * 0.72, h: parcel.h * 0.42 });
+      break;
+    case 'school':
+      layers[0] = { type: 'residential_tile', x: parcel.x, y: parcel.y, w: parcel.w, h: parcel.h };
+      layers.push(frontageGroundTile(parcel, 'residential_tile', 28, 0.78));
+      layers.push({ type: 'grass', x: parcel.x - parcel.w * 0.28, y: parcel.y + parcel.h * 0.16, w: parcel.w * 0.30, h: parcel.h * 0.34 });
+      layers.push({ type: 'concrete', x: parcel.x + parcel.w * 0.22, y: parcel.y - parcel.h * 0.14, w: parcel.w * 0.34, h: parcel.h * 0.22 });
+      break;
+    case 'shrine':
+      layers[0] = { type: 'moss', x: parcel.x, y: parcel.y, w: parcel.w, h: parcel.h };
+      layers.push(frontageGroundTile(parcel, 'gravel', 34, 0.74));
+      layers.push({ type: 'stone_pavement', x: parcel.x, y: parcel.y, w: parcel.w * 0.44, h: parcel.h * 0.54 });
+      layers.push({ type: 'fallen_leaves', x: parcel.x + parcel.w * 0.26, y: parcel.y + parcel.h * 0.18, w: parcel.w * 0.28, h: parcel.h * 0.26 });
+      break;
+    case 'old_town':
+      layers.push(frontageGroundTile(parcel, 'wood_deck', 24, 0.78));
+      layers.push({ type: 'stone_pavement', x: parcel.x, y: parcel.y + parcel.h * 0.10, w: parcel.w * 0.54, h: parcel.h * 0.30 });
+      break;
+    case 'mansion_block':
+      layers[0] = { type: 'grass', x: parcel.x, y: parcel.y, w: parcel.w, h: parcel.h };
+      layers.push(frontageGroundTile(parcel, 'residential_tile', 30, 0.80));
+      layers.push({ type: 'stone_pavement', x: parcel.x, y: parcel.y - parcel.h * 0.04, w: parcel.w * 0.42, h: parcel.h * 0.24 });
+      layers.push({ type: 'dirt', x: parcel.x + parcel.w * 0.24, y: parcel.y + parcel.h * 0.18, w: parcel.w * 0.24, h: parcel.h * 0.24 });
+      break;
+    case 'back_alley':
+      layers.push(frontageGroundTile(parcel, 'concrete', 22, 0.74));
+      layers.push({ type: 'oil_stained_concrete', x: parcel.x, y: parcel.y + parcel.h * 0.16, w: parcel.w * 0.58, h: parcel.h * 0.30 });
+      layers.push({ type: 'steel_plate', x: parcel.x - parcel.w * 0.22, y: parcel.y - parcel.h * 0.16, w: parcel.w * 0.28, h: parcel.h * 0.20 });
+      break;
+    case 'rail_edge':
+      layers.push(frontageGroundTile(parcel, 'steel_plate', 24, 0.78));
+      layers.push({ type: 'concrete', x: parcel.x, y: parcel.y + parcel.h * 0.12, w: parcel.w * 0.62, h: parcel.h * 0.28 });
+      layers.push({ type: 'city_block', x: parcel.x - parcel.w * 0.24, y: parcel.y - parcel.h * 0.16, w: parcel.w * 0.24, h: parcel.h * 0.22 });
+      break;
+    case 'bathhouse':
+      layers.push(frontageGroundTile(parcel, 'wood_deck', 26, 0.76));
+      layers.push({ type: 'fallen_leaves', x: parcel.x + parcel.w * 0.22, y: parcel.y + parcel.h * 0.14, w: parcel.w * 0.28, h: parcel.h * 0.24 });
+      layers.push({ type: 'moss', x: parcel.x - parcel.w * 0.24, y: parcel.y - parcel.h * 0.12, w: parcel.w * 0.24, h: parcel.h * 0.22 });
+      break;
+    case 'nightlife':
+      layers.push(frontageGroundTile(parcel, 'red_carpet', 24, 0.66));
+      layers.push({ type: 'tile', x: parcel.x, y: parcel.y, w: parcel.w * 0.58, h: parcel.h * 0.34 });
+      break;
+    case 'roadside':
+      layers.push(frontageGroundTile(parcel, 'concrete', 34, 0.84));
+      layers.push({ type: 'oil_stained_concrete', x: parcel.x, y: parcel.y + parcel.h * 0.18, w: parcel.w * 0.66, h: parcel.h * 0.38 });
+      layers.push({ type: 'tile', x: parcel.x - parcel.w * 0.24, y: parcel.y - parcel.h * 0.20, w: parcel.w * 0.26, h: parcel.h * 0.22 });
+      break;
+    case 'industrial':
+      layers.push(frontageGroundTile(parcel, 'hazard_stripe', 22, 0.74));
+      layers.push({ type: 'steel_plate', x: parcel.x, y: parcel.y - parcel.h * 0.10, w: parcel.w * 0.72, h: parcel.h * 0.34 });
+      layers.push({ type: 'oil_stained_concrete', x: parcel.x + parcel.w * 0.20, y: parcel.y + parcel.h * 0.22, w: parcel.w * 0.40, h: parcel.h * 0.30 });
+      break;
+    case 'harbor':
+      layers[0] = { type: 'rust_deck', x: parcel.x, y: parcel.y, w: parcel.w, h: parcel.h };
+      layers.push(frontageGroundTile(parcel, 'steel_plate', 28, 0.80));
+      layers.push({ type: 'harbor_water', x: parcel.x + parcel.w * 0.30, y: parcel.y + parcel.h * 0.20, w: parcel.w * 0.34, h: parcel.h * 0.34 });
+      layers.push({ type: 'hazard_stripe', x: parcel.x - parcel.w * 0.22, y: parcel.y - parcel.h * 0.20, w: parcel.w * 0.28, h: parcel.h * 0.16 });
+      break;
+    case 'festival':
+      layers.push(frontageGroundTile(parcel, 'red_carpet', 28, 0.84));
+      layers.push({ type: 'checker_tile', x: parcel.x, y: parcel.y, w: parcel.w * 0.58, h: parcel.h * 0.44 });
+      layers.push({ type: 'grass', x: parcel.x + parcel.w * 0.30, y: parcel.y + parcel.h * 0.18, w: parcel.w * 0.24, h: parcel.h * 0.26 });
+      break;
+    case 'landmark':
+      layers.push(frontageGroundTile(parcel, 'stone_pavement', 34, 0.86));
+      layers.push({ type: 'checker_tile', x: parcel.x, y: parcel.y, w: parcel.w * 0.48, h: parcel.h * 0.36 });
+      layers.push({ type: 'grass', x: parcel.x - parcel.w * 0.30, y: parcel.y + parcel.h * 0.16, w: parcel.w * 0.26, h: parcel.h * 0.28 });
       break;
   }
 
@@ -1260,43 +2311,37 @@ function districtGroundFields(baseY: number, bandHeight: number, blockIdx: numbe
   const y = (ratio: number) => baseY + bandHeight * ratio;
   const fields: GroundTile[] = [];
 
-  const addLeft = (type: GroundTile['type'], yy: number, ww = leftW * 0.92, hh = bandHeight * 0.86) => {
+  const addLeft = (type: GroundTile['type'], yy: number, ww = leftW * 0.78, hh = bandHeight * 0.40) => {
     if (leftW > 24) fields.push({ type, x: leftX, y: yy, w: ww, h: hh });
   };
-  const addRight = (type: GroundTile['type'], yy: number, ww = rightW * 0.92, hh = bandHeight * 0.86) => {
+  const addRight = (type: GroundTile['type'], yy: number, ww = rightW * 0.78, hh = bandHeight * 0.40) => {
     if (rightW > 24) fields.push({ type, x: rightX, y: yy, w: ww, h: hh });
   };
 
   switch (templateId) {
     case 'shopping_street':
-      addLeft('city_block', y(0.45));
-      addRight('tile', y(0.55), rightW * 0.90, bandHeight * 0.76);
-      addRight('wood_deck', y(0.22), Math.min(86, rightW * 0.54), 34);
+      addLeft('tile', y(0.45), leftW * 0.62, bandHeight * 0.34);
+      addRight('stone_pavement', y(0.55), rightW * 0.60, bandHeight * 0.34);
       break;
     case 'residential_lane':
-      addLeft('grass', y(0.45));
-      addRight('fallen_leaves', y(0.58), rightW * 0.88, bandHeight * 0.72);
-      addLeft('residential_tile', y(0.18), Math.min(86, leftW * 0.58), 36);
+      addLeft('residential_tile', y(0.45), leftW * 0.62, bandHeight * 0.34);
+      addRight('grass', y(0.58), rightW * 0.46, bandHeight * 0.28);
       break;
     case 'downtown_crossing':
-      addLeft('city_block', y(0.46), leftW * 0.92, bandHeight * 0.80);
-      addRight('concrete', y(0.50), rightW * 0.88, bandHeight * 0.76);
-      addRight('tile', y(0.20), Math.min(100, rightW * 0.62), 42);
+      addLeft('city_block', y(0.46), leftW * 0.62, bandHeight * 0.34);
+      addRight('concrete', y(0.50), rightW * 0.60, bandHeight * 0.34);
       break;
     case 'civic_plaza':
-      addLeft('grass', y(0.48), leftW * 0.94, bandHeight * 0.86);
-      addRight('stone_pavement', y(0.52), rightW * 0.88, bandHeight * 0.76);
-      addLeft('fallen_leaves', y(0.76), Math.min(104, leftW * 0.64), 42);
+      addLeft('stone_pavement', y(0.48), leftW * 0.64, bandHeight * 0.38);
+      addRight('stone_pavement', y(0.52), rightW * 0.60, bandHeight * 0.34);
       break;
     case 'station_front':
-      addLeft('checker_tile', y(0.44), leftW * 0.90, bandHeight * 0.72);
-      addRight('city_block', y(0.54), rightW * 0.90, bandHeight * 0.76);
-      addLeft('tile', y(0.20), Math.min(112, leftW * 0.64), 38);
+      addLeft('concrete', y(0.44), leftW * 0.62, bandHeight * 0.34);
+      addRight('city_block', y(0.54), rightW * 0.60, bandHeight * 0.34);
       break;
     case 'construction_edge':
-      addLeft('gravel', y(0.54), leftW * 0.92, bandHeight * 0.78);
-      addRight('dirt', y(0.50), rightW * 0.88, bandHeight * 0.72);
-      addLeft('steel_plate', y(0.24), Math.min(112, leftW * 0.68), 42);
+      addLeft('gravel', y(0.54), leftW * 0.62, bandHeight * 0.34);
+      addRight('concrete', y(0.50), rightW * 0.56, bandHeight * 0.30);
       break;
   }
 
@@ -1316,6 +2361,7 @@ function generateGroundGrid(
     { type: 'city_pavement', x: 0, y: baseY + bandHeight / 2, w: C.WORLD_MAX_X - C.WORLD_MIN_X, h: bandHeight },
   ];
   out.push(...districtGroundFields(baseY, bandHeight, blockIdx, templateId));
+
   const parcels = cityParcelsForTemplate(baseY, bandHeight, blockIdx, templateId);
 
   for (const parcel of parcels) {
@@ -1327,7 +2373,11 @@ function generateGroundGrid(
 
 function roadEnvelopeRects(street: StreetLayout): Rect[] {
   return street.roads.map((road) => {
-    const pad = road.sidewalk + 10;
+    const pad =
+      road.role === 'alley' ? road.sidewalk + 2 :
+      road.role === 'service' ? road.sidewalk + 5 :
+      road.role === 'side' ? road.sidewalk + 5 :
+      road.sidewalk + 7;
     return {
       x: road.x - road.w / 2 - pad,
       y: road.y - road.h / 2 - pad,
@@ -1490,8 +2540,8 @@ function addTemplateLandmarkCore(
   switch (templateId) {
     case 'shopping_street':
       addDecal(layout.groundDecals, 'shop_stripe', mainX - 18, centerY, 132, 7, Math.PI / 2, 0.68);
-      addFurniture(layout, 'parasol', mainX + branchDir * 84, street.primaryY + 18);
-      addFurniture(layout, 'popcorn_cart', mainX + branchDir * 102, street.primaryY - 10);
+      addFurniture(layout, 'vending', mainX + branchDir * 84, street.primaryY + 18);
+      addFurniture(layout, 'a_frame_sign', mainX + branchDir * 102, street.primaryY - 10);
       break;
     case 'residential_lane':
       addDecal(layout.groundDecals, 'planter', mainX - branchDir * 96, centerY, 38, 26, 0, 0.64);
@@ -1946,6 +2996,125 @@ function addTemplateFrontage(
   });
 }
 
+function parcelSlotPad(parcel: CityParcel, slot: FrontageSlot): ParcelDecorPlan {
+  const moduleCount = Math.max(1, parcel.slots.length);
+  const span = parcel.frontageSide === 'north' || parcel.frontageSide === 'south' ? parcel.w : parcel.h;
+  const moduleLen = clamp(
+    span / (moduleCount + 0.35),
+    20,
+    parcel.kind === 'towers' || parcel.kind === 'industrial' || parcel.kind === 'harbor' ? 52 : 42,
+  );
+  const padDepth =
+    parcel.kind === 'towers' || parcel.kind === 'station' || parcel.kind === 'civic' ? 22 :
+    parcel.kind === 'industrial' || parcel.kind === 'harbor' || parcel.kind === 'construction' ? 20 :
+    16;
+  const alpha =
+    parcel.detail === 'core' ? 0.46 :
+    parcel.detail === 'infill' ? 0.38 :
+    parcel.detail === 'coverage' ? 0.30 :
+    0.26;
+  return {
+    decal: 'frontage_pad',
+    x: slot.x,
+    y: slot.y,
+    w: moduleLen,
+    h: padDepth,
+    rot: parcel.frontageSide === 'west' || parcel.frontageSide === 'east' ? Math.PI / 2 : 0,
+    alpha,
+  };
+}
+
+function parcelInteriorPlans(parcel: CityParcel, blockIdx: number): ParcelDecorPlan[] {
+  if (parcel.detail === 'coverage' && parcel.coverageKind && parcel.coverageKind !== 'building') {
+    return [];
+  }
+
+  const compact = parcel.detail !== 'core';
+  const alpha =
+    parcel.detail === 'core' ? 0.42 :
+    parcel.detail === 'infill' ? 0.34 :
+    parcel.detail === 'coverage' ? 0.26 :
+    0.24;
+  const phase = positiveMod(blockIdx + parcel.id.length, 4);
+  const frontage = frontageBandForParcel(parcel, parcel.kind === 'homes' || parcel.kind === 'old_town' ? 18 : 14, 0.58);
+  const accessRot = parcel.frontageSide === 'west' || parcel.frontageSide === 'east' ? Math.PI / 2 : 0;
+  const out: ParcelDecorPlan[] = [];
+
+  switch (parcel.kind) {
+    case 'shops':
+    case 'old_town':
+    case 'bathhouse':
+    case 'nightlife':
+      out.push({
+        decal: parcel.kind === 'bathhouse' ? 'driveway' : phase % 2 === 0 ? 'shop_stripe' : 'facade_row',
+        x: frontage.x,
+        y: frontage.y,
+        w: Math.max(24, frontage.w * (compact ? 0.52 : 0.64)),
+        h: parcel.kind === 'bathhouse' ? 9 : phase % 2 === 0 ? 5 : 12,
+        rot: frontage.rot,
+        alpha: alpha + 0.12,
+      });
+      if (!compact) out.push({ decal: 'planter', x: parcel.x + parcel.w * 0.22, y: parcel.y + parcel.h * 0.18, w: parcel.w * 0.18, h: 16, alpha: 0.42 });
+      break;
+    case 'homes':
+    case 'mansion_block':
+      out.push({ decal: 'driveway', x: parcel.x - parcel.w * 0.18, y: parcel.y + parcel.h * 0.08, w: parcel.w * 0.34, h: 8, rot: accessRot, alpha: alpha + 0.06 });
+      out.push({ decal: 'planter', x: parcel.x + parcel.w * 0.24, y: parcel.y + parcel.h * 0.14, w: parcel.w * 0.20, h: 15, alpha: alpha + 0.18 });
+      break;
+    case 'towers':
+    case 'civic':
+    case 'station':
+    case 'rail_edge':
+      out.push({ decal: 'plaza', x: parcel.x, y: parcel.y, w: parcel.w * (compact ? 0.42 : 0.56), h: parcel.h * (compact ? 0.28 : 0.38), alpha });
+      out.push({ decal: 'parking_stall', x: parcel.x, y: parcel.y + parcel.h * 0.24, w: parcel.w * 0.54, h: 14, alpha: alpha + 0.02 });
+      break;
+    case 'park':
+      out.push({ decal: 'plaza', x: parcel.x, y: parcel.y, w: parcel.w * 0.46, h: parcel.h * 0.30, alpha: alpha + 0.02 });
+      out.push({ decal: 'planter', x: parcel.x + parcel.w * 0.24, y: parcel.y - parcel.h * 0.16, w: parcel.w * 0.22, h: 16, alpha: alpha + 0.20 });
+      break;
+    case 'school':
+      out.push({ decal: 'plaza', x: parcel.x - parcel.w * 0.12, y: parcel.y - parcel.h * 0.08, w: parcel.w * 0.42, h: parcel.h * 0.24, alpha });
+      out.push({ decal: 'planter', x: parcel.x + parcel.w * 0.24, y: parcel.y + parcel.h * 0.18, w: parcel.w * 0.18, h: 14, alpha: alpha + 0.16 });
+      break;
+    case 'shrine':
+      out.push({ decal: 'driveway', x: parcel.x, y: parcel.y, w: parcel.w * 0.48, h: 10, rot: frontage.rot, alpha: alpha + 0.10 });
+      out.push({ decal: 'planter', x: parcel.x + parcel.w * 0.26, y: parcel.y + parcel.h * 0.18, w: parcel.w * 0.18, h: 14, alpha: alpha + 0.14 });
+      break;
+    case 'roadside':
+    case 'back_alley':
+      out.push({ decal: 'parking_stall', x: parcel.x, y: parcel.y + parcel.h * 0.12, w: parcel.w * 0.64, h: 16, alpha: alpha + 0.10 });
+      out.push({ decal: 'driveway', x: frontage.x, y: frontage.y, w: Math.max(24, frontage.w * 0.58), h: 9, rot: frontage.rot, alpha: alpha + 0.08 });
+      break;
+    case 'construction':
+    case 'industrial':
+    case 'harbor':
+      out.push({ decal: 'danger_stripe', x: parcel.x, y: parcel.y + parcel.h * 0.18, w: parcel.w * 0.58, h: 8, alpha: alpha + 0.08 });
+      out.push({ decal: 'parking_stall', x: parcel.x - parcel.w * 0.12, y: parcel.y - parcel.h * 0.14, w: parcel.w * 0.42, h: 14, alpha });
+      break;
+    case 'festival':
+      out.push({ decal: 'plaza', x: parcel.x, y: parcel.y, w: parcel.w * 0.56, h: parcel.h * 0.42, alpha: alpha + 0.08 });
+      out.push({ decal: 'shop_stripe', x: frontage.x, y: frontage.y, w: Math.max(24, frontage.w * 0.62), h: 7, rot: frontage.rot, alpha: alpha + 0.18 });
+      break;
+    case 'landmark':
+      out.push({ decal: 'plaza', x: parcel.x, y: parcel.y, w: parcel.w * 0.56, h: parcel.h * 0.42, alpha: alpha + 0.06 });
+      out.push({ decal: 'planter', x: parcel.x - parcel.w * 0.26, y: parcel.y + parcel.h * 0.16, w: parcel.w * 0.18, h: 15, alpha: alpha + 0.18 });
+      break;
+  }
+
+  return compact ? out.slice(0, parcel.detail === 'coverage' ? 1 : 2) : out;
+}
+
+function parcelSitePlans(parcel: CityParcel, blockIdx: number): ParcelDecorPlan[] {
+  const plans: ParcelDecorPlan[] = [];
+  const slotLimit =
+    parcel.detail === 'core' ? parcel.slots.length :
+    parcel.detail === 'infill' ? Math.min(2, parcel.slots.length) :
+    Math.min(1, parcel.slots.length);
+  for (let i = 0; i < slotLimit; i++) plans.push(parcelSlotPad(parcel, parcel.slots[i]));
+  plans.push(...parcelInteriorPlans(parcel, blockIdx));
+  return plans;
+}
+
 function addCityParcelDetails(
   layout: RampageLayoutBand,
   baseY: number,
@@ -1957,15 +3126,29 @@ function addCityParcelDetails(
   const parcels = cityParcelsForTemplate(baseY, bandHeight, ctx.blockIdx, templateId);
   for (const parcel of parcels) {
     const frameAlpha =
+      parcel.detail === 'coverage' && parcel.coverageKind === 'building' ? 0.14 :
+      parcel.detail === 'coverage' && (parcel.coverageKind === 'parking' || parcel.coverageKind === 'workyard') ? 0.10 :
+      parcel.detail === 'coverage' ? 0.06 :
+      parcel.detail === 'accent' ? 0.18 :
+      parcel.detail === 'infill' ? 0.24 :
       parcel.kind === 'park' ? 0.16 :
       parcel.kind === 'construction' ? 0.34 :
       0.28;
     addDecal(layout.groundDecals, 'lot_frame', parcel.x, parcel.y, parcel.w, parcel.h, 0, frameAlpha);
+    for (const plan of parcelSitePlans(parcel, ctx.blockIdx)) {
+      addDecal(layout.groundDecals, plan.decal, plan.x, plan.y, plan.w, plan.h, plan.rot ?? 0, plan.alpha ?? 1);
+    }
     for (const plan of parcel.decor) {
       addDecal(layout.groundDecals, plan.decal, plan.x, plan.y, plan.w, plan.h, plan.rot ?? 0, plan.alpha ?? 1);
     }
     addParcelSignatureFurniture(layout, parcel, ctx.blockIdx);
-    if (parcel.frontageSide === 'east' || parcel.frontageSide === 'west') {
+    const wantsRoadConnector =
+      parcel.detail !== 'coverage' ||
+      !parcel.coverageKind ||
+      parcel.coverageKind === 'building' ||
+      parcel.coverageKind === 'parking' ||
+      parcel.coverageKind === 'workyard';
+    if (wantsRoadConnector && (parcel.frontageSide === 'east' || parcel.frontageSide === 'west')) {
       const parcelEdgeX = parcel.x + (parcel.frontageSide === 'east' ? parcel.w / 2 : -parcel.w / 2);
       const roadEdgeSign = parcelEdgeX < street.mainCorridorX ? -1 : 1;
       const roadEdgeX = street.mainCorridorX + roadEdgeSign * (street.mainRoadH / 2 + street.mainWalkH + 1);
@@ -1997,6 +3180,143 @@ function addParcelSignatureFurniture(layout: RampageLayoutBand, parcel: CityParc
   const frontA = parcelFrontPoint(parcel, -0.34, 12);
   const frontB = parcelFrontPoint(parcel, 0.34, 12);
   const frontC = parcelFrontPoint(parcel, 0, 18);
+
+  if (parcel.detail === 'coverage' && parcel.coverageKind && parcel.coverageKind !== 'building') {
+      switch (parcel.coverageKind) {
+        case 'yard':
+          addFurniture(layout, phase % 2 === 0 ? 'tree' : 'flower_bed', parcel.x + parcel.w * 0.18, parcel.y + parcel.h * 0.08);
+          addFurniture(
+            layout,
+            parcel.kind === 'homes' ? 'mailbox' :
+              parcel.kind === 'mansion_block' ? 'post_box' :
+              parcel.kind === 'bathhouse' || parcel.kind === 'shrine' ? 'stone_lantern' :
+              parcel.kind === 'back_alley' ? 'dumpster' :
+              'potted_plant',
+            frontC.x,
+            frontC.y,
+          );
+          if (parcel.w > 34) addFurniture(layout, phase % 2 === 0 ? 'wood_fence' : 'hedge', frontA.x, frontA.y);
+          return;
+        case 'parking':
+          addFurniture(layout, parcel.kind === 'rail_edge' ? 'railroad_crossing' : 'car', parcel.x - parcel.w * 0.12, parcel.y);
+          addFurniture(layout, phase % 2 === 0 ? 'bollard' : 'street_lamp', frontA.x, frontA.y);
+          if (parcel.w > 40) addFurniture(layout, parcel.kind === 'rail_edge' ? 'platform_edge' : phase % 2 === 0 ? 'guardrail_short' : 'bollard', frontB.x, frontB.y);
+          return;
+        case 'workyard':
+          addFurniture(layout, parcel.kind === 'back_alley' ? 'dumpster' : phase % 2 === 0 ? 'pallet_stack' : 'cargo_container', parcel.x, parcel.y);
+          addFurniture(layout, parcel.kind === 'back_alley' ? 'recycling_bin' : phase % 2 === 0 ? 'traffic_cone' : 'drum_can', frontA.x, frontA.y);
+          if (parcel.w > 40) addFurniture(layout, parcel.kind === 'back_alley' ? 'power_pole' : phase % 2 === 0 ? 'electric_box' : 'sandbags', frontB.x, frontB.y);
+          return;
+        case 'plaza':
+          addFurniture(
+            layout,
+            parcel.kind === 'landmark' ? 'statue' :
+              parcel.kind === 'bathhouse' ? 'bamboo_water_fountain' :
+              parcel.kind === 'rail_edge' ? 'platform_edge' :
+              'bench',
+            parcel.x,
+            parcel.y,
+          );
+          addFurniture(layout, phase % 2 === 0 ? 'flower_bed' : 'street_lamp', frontA.x, frontA.y);
+          if (parcel.w > 38) addFurniture(layout, parcel.kind === 'shrine' || parcel.kind === 'bathhouse' ? 'stone_lantern' : 'bench', frontB.x, frontB.y);
+          return;
+      }
+  }
+
+  if (parcel.detail === 'coverage') {
+    switch (parcel.kind) {
+      case 'shops':
+      case 'old_town':
+      case 'bathhouse':
+      case 'nightlife':
+        addFurniture(layout, phase % 2 === 0 ? 'a_frame_sign' : 'noren', frontC.x, frontC.y);
+        return;
+      case 'homes':
+      case 'mansion_block':
+        addFurniture(layout, phase % 2 === 0 ? 'mailbox' : 'potted_plant', frontC.x, frontC.y);
+        return;
+      case 'school':
+        addFurniture(layout, phase % 2 === 0 ? 'flag_pole' : 'sandbox', frontC.x, frontC.y);
+        return;
+      case 'shrine':
+        addFurniture(layout, phase % 2 === 0 ? 'stone_lantern' : 'sando_stone_pillar', frontC.x, frontC.y);
+        return;
+      case 'roadside':
+      case 'rail_edge':
+        addFurniture(layout, phase % 2 === 0 ? 'car' : 'vending', frontC.x, frontC.y);
+        return;
+      case 'industrial':
+      case 'harbor':
+      case 'construction':
+      case 'back_alley':
+        addFurniture(layout, phase % 2 === 0 ? 'pallet_stack' : 'drum_can', frontC.x, frontC.y);
+        return;
+      case 'festival':
+        addFurniture(layout, phase % 2 === 0 ? 'ticket_booth' : 'balloon_cluster', frontC.x, frontC.y);
+        return;
+      case 'landmark':
+        addFurniture(layout, phase % 2 === 0 ? 'statue' : 'bench', frontC.x, frontC.y);
+        return;
+      case 'towers':
+      case 'civic':
+      case 'station':
+      case 'park':
+        addFurniture(layout, parcel.kind === 'park' ? 'bench' : 'street_lamp', frontC.x, frontC.y);
+        return;
+    }
+  }
+
+  if (parcel.detail !== 'core') {
+    switch (parcel.kind) {
+      case 'shops':
+      case 'old_town':
+      case 'bathhouse':
+      case 'nightlife':
+        addFurniture(layout, phase % 2 === 0 ? 'noren' : 'a_frame_sign', frontA.x, frontA.y);
+        addFurniture(layout, phase % 2 === 0 ? 'vending' : 'chouchin', frontB.x, frontB.y);
+        return;
+      case 'homes':
+      case 'mansion_block':
+        addFurniture(layout, phase % 2 === 0 ? 'mailbox' : 'post_letter_box', frontC.x, frontC.y);
+        addFurniture(layout, phase % 2 === 0 ? 'tree' : 'flower_planter_row', frontB.x, frontB.y);
+        return;
+      case 'school':
+        addFurniture(layout, phase % 2 === 0 ? 'jungle_gym' : 'sandbox', parcel.x + parcel.w * 0.18, parcel.y + parcel.h * 0.10);
+        addFurniture(layout, 'flag_pole', frontC.x, frontC.y);
+        return;
+      case 'shrine':
+        addFurniture(layout, 'torii', frontC.x, frontC.y);
+        addFurniture(layout, phase % 2 === 0 ? 'stone_lantern' : 'sando_stone_pillar', frontA.x, frontA.y);
+        return;
+      case 'roadside':
+      case 'rail_edge':
+        addFurniture(layout, phase % 2 === 0 ? 'car' : 'vending', frontA.x, frontA.y);
+        addFurniture(layout, 'guardrail_short', frontB.x, frontB.y);
+        return;
+      case 'industrial':
+      case 'harbor':
+      case 'construction':
+      case 'back_alley':
+        addFurniture(layout, phase % 2 === 0 ? 'cargo_container' : 'pallet_stack', parcel.x, parcel.y + parcel.h * 0.12);
+        addFurniture(layout, phase % 2 === 0 ? 'drum_can' : 'traffic_cone', frontA.x, frontA.y);
+        return;
+      case 'festival':
+        addFurniture(layout, phase % 2 === 0 ? 'ticket_booth' : 'popcorn_cart', frontC.x, frontC.y);
+        addFurniture(layout, phase % 2 === 0 ? 'balloon_cluster' : 'matsuri_drum', frontA.x, frontA.y);
+        return;
+      case 'landmark':
+        addFurniture(layout, phase % 2 === 0 ? 'statue' : 'fountain_large', parcel.x, parcel.y);
+        addFurniture(layout, 'bench', frontA.x, frontA.y);
+        return;
+      case 'towers':
+      case 'civic':
+      case 'station':
+      case 'park':
+        addFurniture(layout, parcel.kind === 'park' ? 'bench' : 'street_lamp', frontA.x, frontA.y);
+        addFurniture(layout, parcel.kind === 'station' ? 'bus_stop' : 'flower_bed', frontB.x, frontB.y);
+        return;
+    }
+  }
 
   switch (parcel.kind) {
     case 'shops':
@@ -2039,6 +3359,87 @@ function addParcelSignatureFurniture(layout: RampageLayoutBand, parcel: CityParc
       addFurniture(layout, phase % 2 === 0 ? 'cargo_container' : 'pallet_stack', parcel.x, parcel.y + parcel.h * 0.18);
       addFurniture(layout, 'sandbags', frontB.x, frontB.y);
       break;
+    case 'school':
+      addFurniture(layout, 'flag_pole', frontC.x, frontC.y);
+      addFurniture(layout, phase % 2 === 0 ? 'sandbox' : 'jungle_gym', parcel.x + parcel.w * 0.20, parcel.y + parcel.h * 0.12);
+      addFurniture(layout, phase % 2 === 0 ? 'swing_set' : 'slide', frontB.x, frontB.y);
+      addFurniture(layout, 'tree', frontA.x, frontA.y);
+      break;
+    case 'shrine':
+      addFurniture(layout, 'torii', frontC.x, frontC.y);
+      addFurniture(layout, 'stone_lantern', frontA.x, frontA.y);
+      addFurniture(layout, 'stone_lantern', frontB.x, frontB.y);
+      addFurniture(layout, phase % 2 === 0 ? 'ema_wall' : 'omikuji_stand', parcel.x, parcel.y + parcel.h * 0.20);
+      break;
+    case 'old_town':
+      addFurniture(layout, phase % 2 === 0 ? 'noren' : 'chouchin', frontA.x, frontA.y);
+      addFurniture(layout, 'bamboo_fence', frontB.x, frontB.y);
+      addFurniture(layout, phase % 3 === 0 ? 'bonsai' : 'stepping_stones', parcel.x, parcel.y + parcel.h * 0.16);
+      addFurniture(layout, 'potted_plant', frontC.x, frontC.y);
+      break;
+    case 'mansion_block': {
+      const yardA = parcelFrontPoint(parcel, -0.38, 22);
+      const yardB = parcelFrontPoint(parcel, 0.38, 22);
+      addFurniture(layout, 'post_box', frontC.x, frontC.y);
+      addFurniture(layout, phase % 2 === 0 ? 'sakura_tree' : 'pine_tree', yardA.x, yardA.y);
+      addFurniture(layout, 'hedge', frontA.x, frontA.y);
+      addFurniture(layout, phase % 2 === 0 ? 'bush' : 'potted_plant', yardB.x, yardB.y);
+      break;
+    }
+    case 'back_alley':
+      addFurniture(layout, phase % 2 === 0 ? 'dumpster' : 'recycling_bin', parcel.x - parcel.w * 0.16, parcel.y + parcel.h * 0.14);
+      addFurniture(layout, 'power_pole', frontA.x, frontA.y);
+      addFurniture(layout, phase % 2 === 0 ? 'ac_outdoor_cluster' : 'laundry_balcony', frontB.x, frontB.y);
+      addFurniture(layout, phase % 2 === 0 ? 'cat' : 'garbage', frontC.x, frontC.y);
+      break;
+    case 'rail_edge':
+      addFurniture(layout, 'railway_track', parcel.x - parcel.w * 0.16, parcel.y + parcel.h * 0.16);
+      addFurniture(layout, phase % 2 === 0 ? 'railroad_crossing' : 'signal_tower', frontA.x, frontA.y);
+      addFurniture(layout, phase % 2 === 0 ? 'platform_edge' : 'pedestrian_bridge', frontB.x, frontB.y);
+      addFurniture(layout, 'power_pole', frontC.x, frontC.y);
+      break;
+    case 'bathhouse':
+      addFurniture(layout, 'bathhouse_chimney', parcel.x - parcel.w * 0.20, parcel.y - parcel.h * 0.16);
+      addFurniture(layout, phase % 2 === 0 ? 'bamboo_water_fountain' : 'koi_pond', frontA.x, frontA.y);
+      addFurniture(layout, phase % 2 === 0 ? 'sakura_tree' : 'pine_tree', parcel.x + parcel.w * 0.20, parcel.y + parcel.h * 0.12);
+      addFurniture(layout, 'stone_lantern', frontB.x, frontB.y);
+      break;
+    case 'nightlife':
+      addFurniture(layout, 'banner_pole', frontA.x, frontA.y);
+      addFurniture(layout, phase % 2 === 0 ? 'telephone_booth' : 'newspaper_stand', frontB.x, frontB.y);
+      addFurniture(layout, 'vending', frontC.x, frontC.y);
+      addFurniture(layout, 'cable_junction_box', parcel.x, parcel.y + parcel.h * 0.18);
+      break;
+    case 'roadside':
+      addFurniture(layout, phase % 2 === 0 ? 'car' : 'vending', frontA.x, frontA.y);
+      addFurniture(layout, 'street_mirror', frontB.x, frontB.y);
+      addFurniture(layout, 'guardrail_short', frontC.x, frontC.y);
+      addFurniture(layout, 'traffic_cone', parcel.x + parcel.w * 0.24, parcel.y + parcel.h * 0.18);
+      break;
+    case 'industrial':
+      addFurniture(layout, 'forklift', frontA.x, frontA.y);
+      addFurniture(layout, 'drum_can', frontB.x, frontB.y);
+      addFurniture(layout, phase % 2 === 0 ? 'cargo_container' : 'water_tank', parcel.x, parcel.y + parcel.h * 0.18);
+      addFurniture(layout, 'pallet_stack', frontC.x, frontC.y);
+      break;
+    case 'harbor':
+      addFurniture(layout, 'buoy', frontA.x, frontA.y);
+      addFurniture(layout, 'cargo_container', frontB.x, frontB.y);
+      addFurniture(layout, 'forklift', parcel.x - parcel.w * 0.18, parcel.y + parcel.h * 0.18);
+      addFurniture(layout, phase % 2 === 0 ? 'drum_can' : 'pallet_stack', frontC.x, frontC.y);
+      break;
+    case 'festival':
+      addFurniture(layout, 'ticket_booth', frontC.x, frontC.y);
+      addFurniture(layout, phase % 2 === 0 ? 'balloon_cluster' : 'popcorn_cart', frontA.x, frontA.y);
+      addFurniture(layout, 'matsuri_drum', frontB.x, frontB.y);
+      addFurniture(layout, 'parasol', parcel.x, parcel.y + parcel.h * 0.18);
+      break;
+    case 'landmark':
+      addFurniture(layout, phase % 2 === 0 ? 'statue' : 'fountain_large', parcel.x, parcel.y);
+      addFurniture(layout, 'bench', frontA.x, frontA.y);
+      addFurniture(layout, 'bench', frontB.x, frontB.y);
+      addFurniture(layout, 'flag_pole', frontC.x, frontC.y);
+      break;
   }
 }
 
@@ -2058,6 +3459,53 @@ function furniturePointForSlot(slot: FrontageSlot, parcel: CityParcel, itemIndex
   }
 }
 
+function addUnbuiltParcelFallback(layout: RampageLayoutBand, parcel: CityParcel, blockIdx: number): void {
+  const phase = positiveMod(blockIdx + parcel.id.length, 5);
+  const front = parcelFrontPoint(parcel, 0, 16);
+  switch (parcel.kind) {
+      case 'homes':
+      case 'mansion_block':
+      case 'school':
+      case 'park':
+      case 'shrine':
+      case 'bathhouse':
+        addDecal(layout.groundDecals, 'planter', parcel.x - parcel.w * 0.18, parcel.y, Math.min(32, parcel.w * 0.26), Math.min(18, parcel.h * 0.24), 0, 0.50);
+        addFurniture(layout, phase % 2 === 0 ? 'tree' : 'flower_bed', parcel.x + parcel.w * 0.18, parcel.y + parcel.h * 0.10);
+        addFurniture(layout, parcel.kind === 'shrine' || parcel.kind === 'bathhouse' ? 'stone_lantern' : 'bench', front.x, front.y);
+        break;
+      case 'construction':
+      case 'industrial':
+      case 'harbor':
+      case 'back_alley':
+        addDecal(layout.groundDecals, 'danger_stripe', parcel.x, parcel.y, parcel.w * 0.52, 8, 0, 0.38);
+        addFurniture(layout, parcel.kind === 'back_alley' ? 'dumpster' : phase % 2 === 0 ? 'pallet_stack' : 'cargo_container', parcel.x, parcel.y);
+        addFurniture(layout, parcel.kind === 'back_alley' ? 'recycling_bin' : phase % 2 === 0 ? 'traffic_cone' : 'drum_can', front.x, front.y);
+        break;
+    case 'towers':
+    case 'civic':
+      case 'station':
+      case 'roadside':
+      case 'rail_edge':
+        addDecal(layout.groundDecals, 'parking_stall', parcel.x, parcel.y, parcel.w * 0.62, Math.min(22, parcel.h * 0.32), 0, 0.46);
+        addFurniture(layout, parcel.kind === 'rail_edge' ? 'railroad_crossing' : phase % 2 === 0 ? 'car' : 'street_lamp', parcel.x - parcel.w * 0.18, parcel.y);
+        addFurniture(layout, parcel.kind === 'rail_edge' ? 'platform_edge' : phase % 2 === 0 ? 'bollard' : 'vending', front.x, front.y);
+        break;
+    case 'festival':
+    case 'landmark':
+      addDecal(layout.groundDecals, 'plaza', parcel.x, parcel.y, parcel.w * 0.58, parcel.h * 0.40, 0, 0.34);
+      addFurniture(layout, phase % 2 === 0 ? 'ticket_booth' : 'statue', parcel.x, parcel.y);
+      addFurniture(layout, 'bench', front.x, front.y);
+      break;
+      case 'shops':
+      case 'old_town':
+      case 'nightlife':
+        addDecal(layout.groundDecals, 'shop_stripe', front.x, front.y, Math.min(58, parcel.w * 0.58), 5, parcel.frontageSide === 'west' || parcel.frontageSide === 'east' ? Math.PI / 2 : 0, 0.42);
+        addFurniture(layout, phase % 2 === 0 ? 'a_frame_sign' : 'vending', front.x, front.y);
+        addFurniture(layout, phase % 2 === 0 ? 'bicycle_rack' : 'noren', parcel.x, parcel.y + parcel.h * 0.12);
+        break;
+  }
+}
+
 function addParcelFrontages(
   layout: RampageLayoutBand,
   rects: Rect[],
@@ -2071,36 +3519,66 @@ function addParcelFrontages(
   const intent = layout.intent;
 
   for (const parcel of parcels) {
+    if (parcel.detail === 'coverage' && parcel.coverageKind && parcel.coverageKind !== 'building') {
+      continue;
+    }
+
+    let placedCount = 0;
     parcel.slots.forEach((slot, idx) => {
-      placeBuilding(layout, rects, reserved, baseY, bandHeight, {
-        x: slot.x,
-        y: slot.y,
-        size: pick(slot.pool),
-        role: slot.role,
-        intent,
-        motifId: layout.motifId,
-        blockIdx: ctx.blockIdx,
-        jitterX: slot.jitterX,
-        jitterY: slot.jitterY,
-      });
+      const fittedPool = fitBuildingPoolForParcel(parcel, slot.pool);
+      const attempts = parcel.detail === 'coverage' ? Math.min(3, Math.max(1, fittedPool.length)) : 1;
+      let placed = false;
+      for (let attempt = 0; attempt < attempts; attempt++) {
+        const size =
+          parcel.detail === 'coverage'
+            ? fittedPool[positiveMod(ctx.blockIdx + idx + attempt + parcel.id.length, fittedPool.length)]
+            : pick(fittedPool);
+        placed = placeBuilding(layout, rects, reserved, baseY, bandHeight, {
+          x: slot.x,
+          y: slot.y,
+          size,
+          role: slot.role,
+          intent,
+          motifId: layout.motifId,
+          blockIdx: ctx.blockIdx,
+          jitterX: slot.jitterX,
+          jitterY: slot.jitterY,
+        });
+        if (placed) break;
+      }
+      if (!placed) return;
+      placedCount += 1;
 
       const decor = slot.decor ?? furnitureForParcel(parcel.kind);
       const primary = decor[idx % decor.length];
       const p = furniturePointForSlot(slot, parcel, idx);
       addFurniture(layout, primary, p.x, p.y);
-      if (idx % 2 === 0 && parcel.kind !== 'towers') {
+      if (parcel.detail === 'core' && idx % 2 === 0 && parcel.kind !== 'towers') {
         const secondary = decor[(idx + 2) % decor.length];
         const q = furniturePointForSlot(slot, parcel, idx + 1);
         addFurniture(layout, secondary, q.x, q.y);
       }
     });
 
+    if (placedCount === 0) {
+      addUnbuiltParcelFallback(layout, parcel, ctx.blockIdx);
+      if (parcel.detail === 'coverage') continue;
+    }
+
+    const crowdScale = parcel.detail === 'core' ? 1 : parcel.detail === 'infill' ? 0.45 : 0.25;
     if (parcel.kind === 'shops' || parcel.kind === 'station') {
-      addCrowd(layout.humans, parcel.x, parcel.y, parcel.kind === 'station' ? 8 : 6, parcel.w * 0.26, parcel.h * 0.22, 'crowd', 1);
-    } else if (parcel.kind === 'homes') {
-      addCrowd(layout.humans, parcel.x, parcel.y, 3, parcel.w * 0.22, parcel.h * 0.22, 'runner', 1);
+      if (crowdScale < 1 && parcel.kind === 'shops') continue;
+      addCrowd(layout.humans, parcel.x, parcel.y, parcel.kind === 'station' ? Math.max(2, Math.round(8 * crowdScale)) : 6, parcel.w * 0.26, parcel.h * 0.22, 'crowd', 1);
+    } else if (parcel.kind === 'homes' || parcel.kind === 'mansion_block') {
+      if (crowdScale >= 0.45) addCrowd(layout.humans, parcel.x, parcel.y, 2, parcel.w * 0.20, parcel.h * 0.20, 'runner', 1);
     } else if (parcel.kind === 'park') {
-      addCrowd(layout.humans, parcel.x, parcel.y, 5, parcel.w * 0.22, parcel.h * 0.20, 'runner', 1);
+      addCrowd(layout.humans, parcel.x, parcel.y, Math.max(2, Math.round(5 * crowdScale)), parcel.w * 0.22, parcel.h * 0.20, 'runner', 1);
+    } else if (parcel.kind === 'school' || parcel.kind === 'festival') {
+      addCrowd(layout.humans, parcel.x, parcel.y, Math.max(2, Math.round((parcel.kind === 'festival' ? 8 : 6) * crowdScale)), parcel.w * 0.24, parcel.h * 0.18, 'crowd', 1);
+    } else if (parcel.kind === 'nightlife' || parcel.kind === 'roadside' || parcel.kind === 'old_town' || parcel.kind === 'bathhouse' || parcel.kind === 'back_alley' || parcel.kind === 'rail_edge') {
+      if (crowdScale >= 0.45) addCrowd(layout.humans, parcel.x, parcel.y, 2, parcel.w * 0.20, parcel.h * 0.16, 'crowd', 1);
+    } else if (parcel.kind === 'shrine' || parcel.kind === 'landmark') {
+      addCrowd(layout.humans, parcel.x, parcel.y, Math.max(1, Math.round(5 * crowdScale)), parcel.w * 0.20, parcel.h * 0.16, 'runner', 1);
     }
   }
 }

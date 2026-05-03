@@ -4,6 +4,9 @@
 
 import * as C from './constants';
 
+type ScoreTone = 'quiet' | 'small' | 'normal' | 'big' | 'best';
+type WorldPopupKind = 'fuel' | 'boom' | 'pierce' | 'score';
+
 export class UIManager {
   private elDistance    = document.getElementById('distance-display')!;
   private elZone        = document.getElementById('zone-display')!;
@@ -33,6 +36,7 @@ export class UIManager {
   private elStageClearFuel  = document.getElementById('stage-clear-fuel')!;
   private elPopupLayer  = document.getElementById('popup-layer')!;
   private elPause       = document.getElementById('pause')!;
+  private scorePulseTimer: number | null = null;
 
   constructor() {
     // 黄色ベースの fill (ピンチ時は CSS class で赤に切り替え)
@@ -42,36 +46,68 @@ export class UIManager {
     this.elDistance.textContent = `${meters.toLocaleString()} m`;
   }
 
-  setCheckpoint(distanceM: number, nextCheckpointM: number, secondsLeft: number, progressPercent = 0) {
+  setTimeLimit(distanceM: number, secondsLeft: number, progressPercent = 0) {
     const time = Math.max(0, secondsLeft);
-    const remainingM = Math.max(0, Math.ceil(nextCheckpointM - distanceM));
     const pct = Math.max(0, Math.min(100, progressPercent));
-    this.elDistance.textContent =
-      `${distanceM.toLocaleString()}m CP ${remainingM.toLocaleString()}m ${time.toFixed(1)}s`;
+    this.elDistance.textContent = '';
+    this.elDistance.setAttribute('aria-label', `${distanceM.toLocaleString()}m TIME ${time.toFixed(1)}s`);
     this.elFuelFill.style.width = `${pct}%`;
-    this.elFuelWrap.dataset.cp = `${remainingM.toLocaleString()}m`;
+    this.elFuelWrap.dataset.time = `${time.toFixed(1)}s`;
+    this.elFuelWrap.dataset.cp = `${time.toFixed(1)}s`;
     this.elFuelWrap.classList.toggle('low', time <= 6 && time > 3);
     this.elFuelWrap.classList.toggle('crit', time <= 3);
   }
 
   /** ステージ表示: "STAGE N / NAME" (N は 1-origin)。Rampage では CHAIN 表示にも使う。 */
   setZone(stageIndex: number, stageNameEn: string) {
-    this.elZone.textContent = stageIndex < 0 ? stageNameEn : `STAGE ${stageIndex + 1} / ${stageNameEn}`;
+    this.elZone.textContent = '';
+    this.elZone.setAttribute('aria-label', stageIndex < 0 ? stageNameEn : `STAGE ${stageIndex + 1} / ${stageNameEn}`);
   }
 
   /** 現在スコア (建物・車両・家具の破壊で累積) */
-  setScore(score: number) {
+  setScore(score: number, tone: ScoreTone = 'normal') {
     this.elScore.textContent = `SCORE ${score.toLocaleString()}`;
+    this.elScore.dataset.tone = tone;
+    if (score <= 0 || tone === 'quiet') {
+      this.clearScorePulse();
+      return;
+    }
+    this.elScore.classList.remove('score-pop');
+    void this.elScore.offsetWidth;
+    this.elScore.classList.add('score-pop');
+    if (this.scorePulseTimer !== null) window.clearTimeout(this.scorePulseTimer);
+    this.scorePulseTimer = window.setTimeout(() => {
+      this.elScore.classList.remove('score-pop');
+      this.scorePulseTimer = null;
+    }, 220);
+  }
+
+  private clearScorePulse() {
+    this.elScore.classList.remove('score-pop');
+    if (this.scorePulseTimer !== null) {
+      window.clearTimeout(this.scorePulseTimer);
+      this.scorePulseTimer = null;
+    }
+  }
+
+  showScoreNotice(text: string) {
+    const el = document.createElement('div');
+    el.className = 'score-notice';
+    el.textContent = text;
+    el.style.left = `${this.elScore.offsetLeft}px`;
+    el.style.top = `${this.elScore.offsetTop + 16}px`;
+    (this.elScore.parentElement ?? this.elScore).appendChild(el);
+    setTimeout(() => el.remove(), 900);
   }
 
   /** ベストスコア HUD 表示 (0 の場合は隠す) */
   setBest(score: number) {
     if (score > 0) {
       this.elBest.textContent = `BEST ${score.toLocaleString()}`;
-      this.elBest.classList.remove('hidden');
     } else {
-      this.elBest.classList.add('hidden');
+      this.elBest.textContent = '';
     }
+    this.elBest.classList.add('hidden');
   }
 
   setGear(chargePercent: number, gear: number, downThreshold: number) {
@@ -108,7 +144,7 @@ export class UIManager {
   }
 
   setRaceStatus(gear: number, phase: string, chain: number) {
-    this.setZone(-1, `G${gear} ${phase} / HUMAN x${chain}`);
+    this.elZone.setAttribute('aria-label', `GEAR ${gear} ${phase} HUMAN x${chain}`);
   }
 
   /** 毎フレーム1回: ポップアップレイヤー全体をカメラに追従 */
@@ -164,7 +200,7 @@ export class UIManager {
     this.elPause.classList.toggle('show', visible);
   }
 
-  showWorldPopup(worldX: number, worldY: number, text: string, kind: 'fuel' | 'boom' | 'pierce' | 'score' = 'score') {
+  showWorldPopup(worldX: number, worldY: number, text: string, kind: WorldPopupKind = 'score') {
     const el = document.createElement('div');
     el.className = `world-popup ${kind}`;
     el.textContent = text;

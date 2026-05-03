@@ -8,6 +8,7 @@ import {
   circleAABB, circleOBBOverlap, circleCircle, clampSpeed, rand, randInt
 } from './physics';
 import { writeInst, INST_F } from './renderer';
+import { getRampageBuildingProfile } from './rampage-building-profiles';
 import type { BlockIntent, PlacementRole } from './rampage-patterns';
 
 // ===== BALL =====
@@ -801,6 +802,41 @@ export class BuildingManager {
   }
 
   /** 壁付け自販機 (青/赤 2 種)。 */
+  private isHighValueBuilding(b: BuildingData): boolean {
+    const profile = getRampageBuildingProfile(b.size);
+    return profile.klass === 'large' || profile.klass === 'huge' || b.score >= 1000;
+  }
+
+  private drawHighValueBuildingCue(
+    buf: Float32Array,
+    n: number,
+    cx: number,
+    bot: number,
+    top: number,
+    bW: number,
+    bH: number,
+    huge: boolean,
+  ): number {
+    const gold: readonly [number, number, number] = huge ? [1.00, 0.78, 0.18] : [0.92, 0.70, 0.22];
+    const dark: readonly [number, number, number] = [0.42, 0.28, 0.08];
+    const stripW = Math.max(8, bW * 0.70);
+    const stripH = Math.max(1.2, Math.min(2.4, bH * 0.035));
+    writeInst(buf, n++, cx, top - stripH * 1.6, stripW, stripH, gold[0], gold[1], gold[2], 1);
+    writeInst(buf, n++, cx, top - stripH * 2.75, stripW * 0.78, 0.8, dark[0], dark[1], dark[2], 1);
+
+    const tickW = Math.max(2.2, Math.min(4.5, bW * 0.12));
+    const tickH = Math.max(1.2, Math.min(3.0, bH * 0.05));
+    const xL = cx - bW * 0.5 + tickW * 0.5 + 1;
+    const xR = cx + bW * 0.5 - tickW * 0.5 - 1;
+    const yTop = top - tickH * 0.8;
+    const yBot = bot + tickH * 1.6;
+    writeInst(buf, n++, xL, yTop, tickW, tickH, gold[0], gold[1], gold[2], 1);
+    writeInst(buf, n++, xR, yTop, tickW, tickH, gold[0], gold[1], gold[2], 1);
+    writeInst(buf, n++, xL, yBot, tickW, tickH, gold[0] * 0.78, gold[1] * 0.78, gold[2] * 0.78, 1);
+    writeInst(buf, n++, xR, yBot, tickW, tickH, gold[0] * 0.78, gold[1] * 0.78, gold[2] * 0.78, 1);
+    return n;
+  }
+
   private drawVendingMachineInset(
     buf: Float32Array, n: number,
     x: number, y: number
@@ -866,6 +902,10 @@ export class BuildingManager {
       writeInst(buf, n++, cx + 2, cy - 2, bW, bH, 0, 0, 0, 0.32);
       // ファサード本体（GLSLが窓グリッドを担当）
       writeInst(buf, n++, cx, cy, bW, bH, cr, cg, cb, 1);
+      if (this.isHighValueBuilding(b)) {
+        const profile = getRampageBuildingProfile(b.size);
+        n = this.drawHighValueBuildingCue(buf, n, cx, bot, top, bW, bH, profile.klass === 'huge');
+      }
 
       // 種類別ファサードディテール
       switch (b.size) {
@@ -3083,9 +3123,11 @@ export class FurnitureManager {
       switch (item.type) {
         case 'tree': {
           // 俯瞰: 樹冠の丸 + 影
-          writeInst(buf, n++, item.x + 2, item.y - 2, 11, 11, 0, 0, 0, 0.15, 0, 1);
-          writeInst(buf, n++, item.x, item.y, 10, 10, 0.22, 0.55, 0.20, 1, 0, 1);
-          writeInst(buf, n++, item.x - 1, item.y + 1, 5, 5, 0.35, 0.70, 0.28, 0.5, 0, 1);
+          writeInst(buf, n++, item.x, item.y - 2, 2.2, 10, 0.42, 0.25, 0.12, 1);
+          writeInst(buf, n++, item.x, item.y + 2, 9, 8, 0.16, 0.44, 0.14, 1, 0, 1);
+          writeInst(buf, n++, item.x - 3, item.y + 1, 6, 6, 0.20, 0.54, 0.18, 1, 0, 1);
+          writeInst(buf, n++, item.x + 3, item.y + 1, 6, 6, 0.22, 0.58, 0.20, 1, 0, 1);
+          writeInst(buf, n++, item.x - 1, item.y + 4, 3, 2, 0.42, 0.74, 0.30, 1);
           break;
         }
         case 'vending': {
@@ -3139,9 +3181,9 @@ export class FurnitureManager {
         case 'flower_bed': {
           // 俯瞰: 楕円花壇 + 花ドット
           writeInst(buf, n++, item.x, item.y, 13, 6, 0.40, 0.28, 0.18, 1);
-          writeInst(buf, n++, item.x, item.y, 11, 5, 0.30, 0.70, 0.25, 0.9, 0, 1);
-          writeInst(buf, n++, item.x - 3, item.y, 3, 3, 0.95, 0.35, 0.55, 0.9, 0, 1);
-          writeInst(buf, n++, item.x + 3, item.y, 3, 3, 0.95, 0.90, 0.20, 0.9, 0, 1);
+          writeInst(buf, n++, item.x, item.y, 11, 5, 0.24, 0.58, 0.22, 1, 0, 1);
+          writeInst(buf, n++, item.x - 3, item.y, 3, 3, 0.95, 0.35, 0.55, 1, 0, 1);
+          writeInst(buf, n++, item.x + 3, item.y, 3, 3, 0.95, 0.90, 0.20, 1, 0, 1);
           break;
         }
         case 'parasol': {
@@ -3179,14 +3221,14 @@ export class FurnitureManager {
         }
         case 'fountain': {
           // 俯瞰: 低い石組みの噴水。発光リングに見えないよう矩形ベースで描く。
-          writeInst(buf, n++, item.x + 2, item.y - 2, 18, 13, 0, 0, 0, 0.14);
+          writeInst(buf, n++, item.x + 2, item.y - 2, 18, 13, 0, 0, 0, 0.12);
           writeInst(buf, n++, item.x, item.y, 18, 13, 0.58, 0.56, 0.50, 1);
-          writeInst(buf, n++, item.x, item.y, 13, 8, 0.28, 0.52, 0.66, 0.82);
-          writeInst(buf, n++, item.x, item.y - 4.5, 15, 1.2, 0.78, 0.76, 0.68, 0.65);
-          writeInst(buf, n++, item.x, item.y + 4.5, 15, 1.2, 0.42, 0.40, 0.36, 0.45);
+          writeInst(buf, n++, item.x, item.y, 13, 8, 0.25, 0.48, 0.58, 1);
+          writeInst(buf, n++, item.x, item.y - 4.5, 15, 1.2, 0.78, 0.76, 0.68, 1);
+          writeInst(buf, n++, item.x, item.y + 4.5, 15, 1.2, 0.42, 0.40, 0.36, 1);
           if (item.hp > 0) {
-            writeInst(buf, n++, item.x - 3, item.y, 1.2, 6, 0.82, 0.92, 0.98, 0.55);
-            writeInst(buf, n++, item.x + 3, item.y, 1.2, 6, 0.82, 0.92, 0.98, 0.55);
+            writeInst(buf, n++, item.x - 3, item.y, 1.2, 6, 0.82, 0.92, 0.98, 1);
+            writeInst(buf, n++, item.x + 3, item.y, 1.2, 6, 0.82, 0.92, 0.98, 1);
           }
           break;
         }
@@ -3293,15 +3335,15 @@ export class FurnitureManager {
         }
         // ── 植栽 ────────────────────────────────────────────────
         case 'bush': {
-          writeInst(buf, n++, item.x + 2, item.y - 2, 12, 9, 0, 0, 0, 0.14, 0, 1);
-          writeInst(buf, n++, item.x, item.y, 11, 8, 0.22, 0.52, 0.18, 1, 0, 1);
-          writeInst(buf, n++, item.x - 2, item.y + 1, 5, 4, 0.30, 0.62, 0.22, 0.6, 0, 1);
+          writeInst(buf, n++, item.x, item.y, 11, 8, 0.17, 0.42, 0.14, 1, 0, 1);
+          writeInst(buf, n++, item.x - 2, item.y + 1, 5, 4, 0.28, 0.58, 0.20, 1, 0, 1);
+          writeInst(buf, n++, item.x + 3, item.y - 1, 4, 3, 0.22, 0.50, 0.18, 1, 0, 1);
           break;
         }
         case 'hedge': {
           writeInst(buf, n++, item.x, item.y, 17, 7, 0.20, 0.48, 0.16, 1);
-          writeInst(buf, n++, item.x - 4, item.y + 1, 4, 4, 0.28, 0.58, 0.22, 0.6, 0, 1);
-          writeInst(buf, n++, item.x + 4, item.y + 1, 4, 4, 0.28, 0.58, 0.22, 0.6, 0, 1);
+          writeInst(buf, n++, item.x - 4, item.y + 1, 4, 4, 0.28, 0.58, 0.22, 1, 0, 1);
+          writeInst(buf, n++, item.x + 4, item.y + 1, 4, 4, 0.28, 0.58, 0.22, 1, 0, 1);
           break;
         }
         case 'planter': {
@@ -3311,24 +3353,27 @@ export class FurnitureManager {
         }
         case 'sakura_tree': {
           // ピンクの花冠
-          writeInst(buf, n++, item.x + 2, item.y - 2, 16, 16, 0, 0, 0, 0.14, 0, 1);
-          writeInst(buf, n++, item.x, item.y, 15, 15, 0.95, 0.72, 0.78, 1, 0, 1);
-          writeInst(buf, n++, item.x - 2, item.y + 2, 7, 7, 1.0, 0.82, 0.88, 0.55, 0, 1);
-          writeInst(buf, n++, item.x + 3, item.y + 1, 5, 5, 0.95, 0.90, 0.95, 0.45, 0, 1);
+          writeInst(buf, n++, item.x, item.y - 2, 2, 10, 0.42, 0.25, 0.14, 1);
+          writeInst(buf, n++, item.x, item.y + 2, 13, 12, 0.92, 0.62, 0.70, 1, 0, 1);
+          writeInst(buf, n++, item.x - 4, item.y + 1, 7, 7, 0.98, 0.76, 0.84, 1, 0, 1);
+          writeInst(buf, n++, item.x + 4, item.y + 1, 6, 6, 0.95, 0.80, 0.88, 1, 0, 1);
+          writeInst(buf, n++, item.x + 1, item.y + 5, 4, 3, 1.0, 0.90, 0.95, 1);
           break;
         }
         case 'pine_tree': {
           // 三角錐形
-          writeInst(buf, n++, item.x + 2, item.y - 2, 13, 18, 0, 0, 0, 0.15, 0, 1);
+          writeInst(buf, n++, item.x, item.y - 1, 2, 14, 0.40, 0.24, 0.12, 1);
           writeInst(buf, n++, item.x, item.y, 12, 17, 0.12, 0.40, 0.18, 1);
-          writeInst(buf, n++, item.x, item.y + 3, 7, 10, 0.18, 0.52, 0.22, 0.7);
+          writeInst(buf, n++, item.x, item.y + 3, 8, 10, 0.18, 0.52, 0.22, 1);
+          writeInst(buf, n++, item.x, item.y + 6, 5, 5, 0.24, 0.62, 0.26, 1);
           break;
         }
         case 'palm_tree': {
           // 幹 + 葉冠
           writeInst(buf, n++, item.x, item.y - 2, 3, 16, 0.62, 0.48, 0.28, 1);
-          writeInst(buf, n++, item.x + 2, item.y - 1, 14, 7, 0, 0, 0, 0.14, 0, 1);
-          writeInst(buf, n++, item.x, item.y, 13, 6, 0.25, 0.62, 0.22, 1, 0, 1);
+          writeInst(buf, n++, item.x, item.y + 4, 13, 5, 0.18, 0.48, 0.16, 1);
+          writeInst(buf, n++, item.x - 4, item.y + 1, 7, 3, 0.26, 0.62, 0.22, 1);
+          writeInst(buf, n++, item.x + 4, item.y + 1, 7, 3, 0.26, 0.62, 0.22, 1);
           break;
         }
         case 'bamboo_cluster': {
@@ -3336,7 +3381,7 @@ export class FurnitureManager {
           writeInst(buf, n++, item.x - 3, item.y, 2, 17, 0.32, 0.60, 0.25, 1);
           writeInst(buf, n++, item.x, item.y + 1, 2, 18, 0.28, 0.58, 0.22, 1);
           writeInst(buf, n++, item.x + 3, item.y, 2, 16, 0.35, 0.62, 0.27, 1);
-          writeInst(buf, n++, item.x, item.y, 1.5, 17, 0.40, 0.68, 0.30, 0.5);
+          writeInst(buf, n++, item.x, item.y, 1.5, 17, 0.40, 0.68, 0.30, 1);
           break;
         }
         // ── ミニチュア風ディテール ────────────────────────────────
@@ -3493,11 +3538,11 @@ export class FurnitureManager {
           writeInst(buf, n++, item.x + 1, item.y - 1, 21, 14, 0, 0, 0, 0.20, 0, 1);
           writeInst(buf, n++, item.x, item.y, 20, 13, 0.40, 0.32, 0.20, 1, 0, 1); // 土手
           writeInst(buf, n++, item.x, item.y, 17, 10, 0.20, 0.45, 0.55, 1, 0, 1); // 水
-          writeInst(buf, n++, item.x, item.y, 14, 8, 0.30, 0.55, 0.65, 0.7, 0, 1); // 内側水
-          writeInst(buf, n++, item.x - 4, item.y - 1, 5, 3, 0.25, 0.55, 0.30, 0.85, 0, 1); // 蓮
-          writeInst(buf, n++, item.x + 4, item.y + 1, 5, 3, 0.25, 0.55, 0.30, 0.85, 0, 1);
-          writeInst(buf, n++, item.x, item.y, 3, 1.5, 0.95, 0.55, 0.18, 0.95); // 鯉橙
-          writeInst(buf, n++, item.x + 1, item.y + 2, 3, 1.2, 0.95, 0.95, 0.95, 0.95); // 鯉白
+          writeInst(buf, n++, item.x, item.y, 14, 8, 0.30, 0.55, 0.65, 1, 0, 1); // 内側水
+          writeInst(buf, n++, item.x - 4, item.y - 1, 5, 3, 0.25, 0.55, 0.30, 1, 0, 1); // 蓮
+          writeInst(buf, n++, item.x + 4, item.y + 1, 5, 3, 0.25, 0.55, 0.30, 1, 0, 1);
+          writeInst(buf, n++, item.x, item.y, 3, 1.5, 0.95, 0.55, 0.18, 1); // 鯉橙
+          writeInst(buf, n++, item.x + 1, item.y + 2, 3, 1.2, 0.95, 0.95, 0.95, 1); // 鯉白
           break;
         }
         case 'bonsai': {
@@ -3505,8 +3550,8 @@ export class FurnitureManager {
           writeInst(buf, n++, item.x + 1, item.y + 1, 9, 6, 0, 0, 0, 0.18);
           writeInst(buf, n++, item.x, item.y + 2, 8, 3, 0.45, 0.30, 0.18, 1); // 鉢
           writeInst(buf, n++, item.x, item.y - 1, 7, 5, 0.20, 0.50, 0.22, 1, 0, 1); // 樹冠
-          writeInst(buf, n++, item.x - 1, item.y, 1, 4, 0.35, 0.22, 0.10, 0.8); // 幹
-          writeInst(buf, n++, item.x - 2, item.y - 2, 3, 2, 0.30, 0.62, 0.28, 0.7, 0, 1);
+          writeInst(buf, n++, item.x - 1, item.y, 1, 4, 0.35, 0.22, 0.10, 1); // 幹
+          writeInst(buf, n++, item.x - 2, item.y - 2, 3, 2, 0.30, 0.62, 0.28, 1, 0, 1);
           break;
         }
         case 'street_mirror': {
@@ -3817,27 +3862,27 @@ export class FurnitureManager {
         }
         case 'plaza_tile_circle': {
           // 広場の敷石。ターゲット状に見えないよう、薄い角タイルにする。
-          writeInst(buf, n++, item.x, item.y, 36, 24, 0.68, 0.64, 0.54, 0.44);
-          writeInst(buf, n++, item.x, item.y - 6, 34, 0.8, 0.48, 0.45, 0.38, 0.28);
-          writeInst(buf, n++, item.x, item.y + 6, 34, 0.8, 0.78, 0.74, 0.62, 0.26);
-          writeInst(buf, n++, item.x - 9, item.y, 0.8, 20, 0.50, 0.47, 0.40, 0.22);
-          writeInst(buf, n++, item.x + 9, item.y, 0.8, 20, 0.78, 0.74, 0.62, 0.20);
+          writeInst(buf, n++, item.x, item.y, 36, 24, 0.68, 0.64, 0.54, 1);
+          writeInst(buf, n++, item.x, item.y - 6, 34, 0.8, 0.48, 0.45, 0.38, 1);
+          writeInst(buf, n++, item.x, item.y + 6, 34, 0.8, 0.78, 0.74, 0.62, 1);
+          writeInst(buf, n++, item.x - 9, item.y, 0.8, 20, 0.50, 0.47, 0.40, 1);
+          writeInst(buf, n++, item.x + 9, item.y, 0.8, 20, 0.78, 0.74, 0.62, 1);
           break;
         }
         case 'fountain_large': {
           // 大噴水。画面上で白い楕円に見えないよう、石枠と水面を低彩度にする。
           writeInst(buf, n++, item.x + 2, item.y - 2, 28, 20, 0, 0, 0, 0.15);
           writeInst(buf, n++, item.x, item.y, 29, 20, 0.58, 0.56, 0.50, 1);
-          writeInst(buf, n++, item.x, item.y, 22, 13, 0.30, 0.52, 0.64, 0.86);
-          writeInst(buf, n++, item.x, item.y - 8, 24, 1.3, 0.78, 0.76, 0.68, 0.62);
-          writeInst(buf, n++, item.x, item.y + 8, 24, 1.3, 0.42, 0.40, 0.36, 0.44);
-          writeInst(buf, n++, item.x - 12, item.y, 1.3, 14, 0.44, 0.42, 0.38, 0.48);
-          writeInst(buf, n++, item.x + 12, item.y, 1.3, 14, 0.78, 0.76, 0.68, 0.46);
+          writeInst(buf, n++, item.x, item.y, 22, 13, 0.30, 0.52, 0.64, 1);
+          writeInst(buf, n++, item.x, item.y - 8, 24, 1.3, 0.78, 0.76, 0.68, 1);
+          writeInst(buf, n++, item.x, item.y + 8, 24, 1.3, 0.42, 0.40, 0.36, 1);
+          writeInst(buf, n++, item.x - 12, item.y, 1.3, 14, 0.44, 0.42, 0.38, 1);
+          writeInst(buf, n++, item.x + 12, item.y, 1.3, 14, 0.78, 0.76, 0.68, 1);
           writeInst(buf, n++, item.x, item.y, 5, 6, 0.60, 0.58, 0.52, 1);
-          writeInst(buf, n++, item.x, item.y - 1, 2.5, 5, 0.82, 0.78, 0.70, 0.82);
-          writeInst(buf, n++, item.x, item.y - 5, 1, 5, 0.82, 0.92, 0.98, 0.56);
-          writeInst(buf, n++, item.x - 5, item.y, 5, 1, 0.82, 0.92, 0.98, 0.42);
-          writeInst(buf, n++, item.x + 5, item.y, 5, 1, 0.82, 0.92, 0.98, 0.42);
+          writeInst(buf, n++, item.x, item.y - 1, 2.5, 5, 0.82, 0.78, 0.70, 1);
+          writeInst(buf, n++, item.x, item.y - 5, 1, 5, 0.82, 0.92, 0.98, 1);
+          writeInst(buf, n++, item.x - 5, item.y, 5, 1, 0.82, 0.92, 0.98, 1);
+          writeInst(buf, n++, item.x + 5, item.y, 5, 1, 0.82, 0.92, 0.98, 1);
           break;
         }
         case 'taxi_rank_sign': {
@@ -3896,13 +3941,13 @@ export class FurnitureManager {
           writeInst(buf, n++, item.x, item.y + 2.5, 4, 1.5, 0.45, 0.55, 0.32, 1); // 石皿
           writeInst(buf, n++, item.x - 0.5, item.y, 3.5, 0.8, 0.62, 0.85, 0.52, 1, 20, 0); // 竹筒
           writeInst(buf, n++, item.x, item.y - 1.5, 0.8, 2.5, 0.55, 0.75, 0.45, 1); // 支柱
-          writeInst(buf, n++, item.x + 1, item.y + 2.5, 1.5, 0.5, 0.35, 0.55, 0.82, 0.85); // 水
+          writeInst(buf, n++, item.x + 1, item.y + 2.5, 1.5, 0.5, 0.35, 0.55, 0.82, 1); // 水
           break;
         }
         case 'puddle_reflection': {
           // 路面の水たまり
-          writeInst(buf, n++, item.x, item.y, 8, 4, 0.25, 0.42, 0.62, 0.55, 0, 1); // 水面
-          writeInst(buf, n++, item.x - 1, item.y - 0.5, 4, 1.5, 0.55, 0.72, 0.85, 0.70, 0, 1); // ハイライト
+          writeInst(buf, n++, item.x, item.y, 8, 4, 0.20, 0.38, 0.54, 1, 0, 1); // 水面
+          writeInst(buf, n++, item.x - 1, item.y - 0.5, 4, 1.5, 0.55, 0.72, 0.85, 1, 0, 1); // ハイライト
           break;
         }
         case 'manhole_cover': {

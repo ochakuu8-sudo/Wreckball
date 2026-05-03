@@ -1,5 +1,4 @@
 import { Game } from './game';
-import { initSdk } from './sdk';
 
 const canvas = document.getElementById('gameCanvas') as HTMLCanvasElement;
 if (!canvas) throw new Error('Canvas not found');
@@ -7,6 +6,7 @@ if (!canvas) throw new Error('Canvas not found');
 const params = new URLSearchParams(window.location.search);
 const screenshotMode = params.has('screenshot');
 const screenshotChunkId = params.has('chunk') ? parseInt(params.get('chunk')!, 10) : null;
+document.title = 'Wreckball';
 if (screenshotMode) document.body.classList.add('screenshot-mode');
 
 const wrap = document.getElementById('wrap') as HTMLElement;
@@ -18,15 +18,13 @@ window.addEventListener('resize', applyScale);
 applyScale();
 
 const leftTitle = document.querySelector('#side-left .title-big');
-if (leftTitle) leftTitle.innerHTML = 'RAMPAGE<br>PINBALL';
+if (leftTitle) leftTitle.innerHTML = 'WRECKBALL';
 const leftSub = document.querySelector('#side-left .sub');
 if (leftSub) leftSub.innerHTML = 'CRUSH THE CITY<br>EAT FOR GEARS';
 const rightTitle = document.querySelector('#side-right .title-big');
 if (rightTitle) rightTitle.innerHTML = 'GEAR<br>CHAIN';
 const rightSub = document.querySelector('#side-right .sub');
 if (rightSub) rightSub.innerHTML = 'BREAK SMALL BUILDINGS<br>EAT HUMANS<br>SHIFT UP<br>OVERDRIVE';
-
-initSdk();
 
 try {
   const game = new Game(canvas, { screenshotMode, screenshotChunkId });

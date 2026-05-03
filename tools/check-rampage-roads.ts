@@ -64,6 +64,35 @@ function hasMainPathTraversal(layout: RampageRoadDebug): boolean {
   return false;
 }
 
+function edgeCanReachMain(edge: RampageRoadDebug['edges'][number], layout: RampageRoadDebug): boolean {
+  if (edge.mainPath) return true;
+  const mainNodes = new Set<string>();
+  const graph = new Map<string, string[]>();
+  for (const candidate of layout.edges) {
+    const a = key(candidate.from);
+    const b = key(candidate.to);
+    graph.set(a, [...(graph.get(a) ?? []), b]);
+    graph.set(b, [...(graph.get(b) ?? []), a]);
+    if (candidate.mainPath) {
+      mainNodes.add(a);
+      mainNodes.add(b);
+    }
+  }
+
+  const stack = [key(edge.from), key(edge.to)];
+  const seen = new Set<string>();
+  while (stack.length > 0) {
+    const cur = stack.pop()!;
+    if (mainNodes.has(cur)) return true;
+    const [x, y] = cur.split(',').map(Number);
+    if (pointOnMainPath({ x, y }, layout)) return true;
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    for (const next of graph.get(cur) ?? []) stack.push(next);
+  }
+  return false;
+}
+
 function checkLayout(layout: RampageRoadDebug): void {
   const baseY = C.WORLD_MIN_Y + 10 + (layout.blockIdx + 4) * C.CHUNK_HEIGHT;
 
@@ -83,9 +112,9 @@ function checkLayout(layout: RampageRoadDebug): void {
 
   for (const edge of layout.edges) {
     if (edge.mainPath) continue;
-    const connected = pointOnMainPath(edge.from, layout) || pointOnMainPath(edge.to, layout);
+    const connected = pointOnMainPath(edge.from, layout) || pointOnMainPath(edge.to, layout) || edgeCanReachMain(edge, layout);
     if (!connected) {
-      push('error', layout.blockIdx, `non-main ${edge.role} road is not connected to the main road`);
+      push('error', layout.blockIdx, `non-main ${edge.role} road cannot reach the main road graph`);
     }
     if (edge.endpoint === 'through' && layout.templateId !== 'downtown_crossing') {
       push('error', layout.blockIdx, `through side road appears in ${layout.templateId}`);
