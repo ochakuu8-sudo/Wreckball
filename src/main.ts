@@ -1,4 +1,4 @@
-import { Game } from './game';
+import { NewGame } from './newGame';
 
 const canvas = document.getElementById('gameCanvas') as HTMLCanvasElement;
 if (!canvas) throw new Error('Canvas not found');
@@ -27,7 +27,7 @@ const rightSub = document.querySelector('#side-right .sub');
 if (rightSub) rightSub.innerHTML = 'BREAK SMALL BUILDINGS<br>EAT HUMANS<br>SHIFT UP<br>OVERDRIVE';
 
 try {
-  const game = new Game(canvas, { screenshotMode, screenshotChunkId });
+  const game = new NewGame(canvas);
   void game;
   const loading = document.getElementById('loading');
   if (loading) {
